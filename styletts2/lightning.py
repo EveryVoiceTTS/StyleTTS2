@@ -103,6 +103,21 @@ class StyleTTS2DataModule(L.LightningDataModule):
                 dp["train_data"], dp["val_data"]
             )
 
+    def _ood_data_path(self, dp) -> str:
+        """Return the OOD data path to pass to FilePathDataset.
+
+        When running in EveryVoice mode and a preprocessed ood.psv exists in the
+        preprocessed directory (written by ``everyvoice preprocess text-to-wav
+        --ood-data-file``), use it so that OOD tokens are consistent with the
+        training vocabulary and G2P configuration.  Otherwise fall back to the
+        raw OOD text file specified in the config.
+        """
+        if self.load_for_everyvoice and self._preprocessed_dir is not None:
+            ood_psv = Path(self._preprocessed_dir) / "ood.psv"
+            if ood_psv.exists():
+                return str(ood_psv)
+        return dp["OOD_data"]
+
     def train_dataloader(self):
         dp = self.config["data_params"]
         return build_dataloader(
@@ -113,7 +128,7 @@ class StyleTTS2DataModule(L.LightningDataModule):
             output_sampling_rate=self._output_sampling_rate,
             ev_text_config=self._ev_text_config,
             pretrained_symbols=self._pretrained_symbols,
-            OOD_data=dp["OOD_data"],
+            OOD_data=self._ood_data_path(dp),
             min_length=dp["min_length"],
             batch_size=self.config.get("batch_size", 16),
             num_workers=2,
@@ -129,7 +144,7 @@ class StyleTTS2DataModule(L.LightningDataModule):
             output_sampling_rate=self._output_sampling_rate,
             ev_text_config=self._ev_text_config,
             pretrained_symbols=self._pretrained_symbols,
-            OOD_data=dp["OOD_data"],
+            OOD_data=self._ood_data_path(dp),
             min_length=dp["min_length"],
             batch_size=self.config.get("batch_size", 16),
             validation=True,

@@ -4,7 +4,7 @@ import logging
 import os.path as osp
 import random
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import librosa
 import numpy as np
@@ -109,10 +109,21 @@ class FilePathDataset(torch.utils.data.Dataset):
         self.silence_pad_samples = pp.get("silence_pad_samples", 5000)
         self.min_length = min_length
 
-        with open(OOD_data, "r", encoding="utf-8") as f:
-            tl = f.readlines()
-        idx = 1 if ".wav" in tl[0].split("|")[0] else 0
-        self.ptexts = [t.split("|")[idx] for t in tl]
+        # Load OOD texts. If the path points to a preprocessed .psv filelist
+        # (written by `everyvoice preprocess text-to-wav --ood-data-file`),
+        # store dicts and use the EveryVoice token columns. Otherwise fall
+        # back to the original plain-text / pipe-separated loading.
+        if Path(OOD_data).suffix == ".psv":
+            from everyvoice.utils import generic_psv_filelist_reader
+
+            self.ptexts: list[Any] = generic_psv_filelist_reader(OOD_data)
+            self._ood_preprocessed = True
+        else:
+            with open(OOD_data, "r", encoding="utf-8") as f:
+                tl = f.readlines()
+            idx = 1 if ".wav" in tl[0].split("|")[0] else 0
+            self.ptexts = [t.split("|")[idx] for t in tl]
+            self._ood_preprocessed = False
 
         self.root_path = root_path
 
@@ -245,20 +256,30 @@ class FilePathDataset(torch.utils.data.Dataset):
         length_feature = acoustic_feature.size(1)
         acoustic_feature = acoustic_feature[:, : (length_feature - length_feature % 2)]
 
-        # OOD text — raw strings through StyleTTS2's TextCleaner in both modes.
-        # TODO: In EveryVoice mode this should ideally use text that has been
-        #   preprocessed by ``everyvoice preprocess`` (normalised + G2P'd) so
-        #   that OOD validation audio is consistent with training text.  For now
-        #   TextCleaner gives sufficient quality for qualitative listening.
-        ps = ""
-        while len(ps) < self.min_length:
+        # OOD text — sampled from either the preprocessed ood.psv (EveryVoice
+        # mode) or the original plain-text file (original mode).
+        # TODO: For multilingual models, prefer OOD items whose language column
+        #   matches the current training utterance so each language hears
+        #   language-appropriate reference text during validation.
+        ps_text = ""
+        while len(ps_text) < self.min_length:
             rand_idx = np.random.randint(0, len(self.ptexts) - 1)
-            ps = self.ptexts[rand_idx]
+            ood_item = self.ptexts[rand_idx]
 
-            text = self.text_cleaner(ps)
-            text.insert(0, 0)
-            text.append(0)
-            ref_text = torch.LongTensor(text)
+            if self._ood_preprocessed:
+                ps_text = ood_item.get("characters", "")
+                if self._ev_encoder is not None:
+                    token_str = ood_item.get(self._token_column, "")
+                    indices = self._ev_encoder.encode_token_sequence(token_str)
+                else:
+                    indices = self.text_cleaner(ps_text)
+            else:
+                ps_text = ood_item
+                indices = self.text_cleaner(ps_text)
+
+            indices.insert(0, 0)
+            indices.append(0)
+            ref_text = torch.LongTensor(indices)
 
         return (
             speaker_id,
