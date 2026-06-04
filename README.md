@@ -1,3 +1,14 @@
+# EveryVoiceTTS fork of StyleTTS2
+
+This version of StyleTTS2 has been forked from https://github.com/yl4579/StyleTTS2 by
+the EveryVoiceTTS team at NRC for the purpose of:
+ - Integrating it with EveryVoice
+ - Making it faster
+ - Making it easier to use, especially (but not only) for low-resource Indigenous languages.
+
+Typical installation of this fork is done by installing EveryVoice itself.
+See https://github.com/EveryVoiceTTS/EveryVoice
+
 # StyleTTS 2: Towards Human-Level Text-to-Speech through Style Diffusion and Adversarial Training with Large Speech Language Models
 
 ### Yinghao Aaron Li, Cong Han, Vinay S. Raghavan, Gavin Mischler, Nima Mesgarani
