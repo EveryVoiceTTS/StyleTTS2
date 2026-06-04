@@ -1,3 +1,30 @@
+# Original main branch before filtering
+
+This branch of https://github.com/EveryVoiceTTS/StyleTTS2 is the original, unfiltered
+branch, as forked from https://github.com/yl4579/StyleTTS2. It includes very large
+pre-trained model files right in the repo, which make it expensive to clone.
+
+We have now run git-filter-repo to remove the following large files from the history:
+ - asr/epoch_00080.pth (94MB)
+ - plbert/step_1000000.t7 (25MB)
+ - jdc/bst.t7 (21MB)
+ - data/OOD_texts.txt (31MB)
+
+Instead of living in the repo with the source code, these files are now fetched
+from HuggingFace repos when they are needed.
+
+Now, this message exists in a branch that is going to be deleted, so that when
+we clone StyleTTS2, the large files are not downloaded, but it's going to remain
+on GitHub protected from garbage collection by being the head of a pull request.
+It will be fetcheable in the future by running
+
+    git fetch origin pull/12/head:unfiltered-branch
+
+Please never merge any commits from any unfiltered branch back into the filtered
+main history! This is here only for future reference when needed, and so that
+when we checkout EveryVoice commits from before we filtered this repo, `git
+submodule update` is able to find the required commits.
+
 # StyleTTS 2: Towards Human-Level Text-to-Speech through Style Diffusion and Adversarial Training with Large Speech Language Models
 
 ### Yinghao Aaron Li, Cong Han, Vinay S. Raghavan, Gavin Mischler, Nima Mesgarani
