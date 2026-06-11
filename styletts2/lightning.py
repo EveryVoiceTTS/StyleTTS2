@@ -139,7 +139,8 @@ class StyleTTS2DataModule(L.LightningDataModule):
                 "No preprocessed OOD data found under '%s/ood/'. "
                 "Falling back to the validation split as OOD reference text. "
                 "This pollutes the train/validation split — do not use when "
-                "reporting research results. To silence this warning, run "
+                "tracking research results, since it could make your validation loss artificially lower. "
+                "To silence this warning, run "
                 "'everyvoice preprocess text-to-wav' with ood_raw_data configured.",
                 self._preprocessed_dir,
             )
