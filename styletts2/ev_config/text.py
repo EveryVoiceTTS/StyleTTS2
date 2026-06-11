@@ -11,15 +11,13 @@ No cleaners, no G2P, no TextProcessor pipeline at encode time.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from everyvoice.text.features import DEFAULT_PUNCTUATION_HASH
+from loguru import logger
 
 if TYPE_CHECKING:
     from everyvoice.config.text_config import TextConfig
-
-logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # EveryVoice internal punctuation token → nearest StyleTTS2 character
