@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from everyvoice.base_cli import default_typer_args
 from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.type_definitions import (
     SynthesizeOutputFormats,
 )
@@ -110,7 +111,7 @@ def synthesize_one(
 # CLI command
 # ---------------------------------------------------------------------------
 
-app = typer.Typer(pretty_exceptions_show_locals=False)
+app = typer.Typer(**default_typer_args)
 
 
 @app.command(
