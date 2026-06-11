@@ -103,23 +103,63 @@ class StyleTTS2DataModule(L.LightningDataModule):
                 dp["train_data"], dp["val_data"]
             )
 
-    def _ood_data_path(self, dp) -> str:
-        """Return the OOD data path to pass to FilePathDataset.
+    def _resolve_ood_sources(self) -> "tuple[dict[str, Path], list[dict] | None]":
+        """Resolve per-language OOD sources for EV mode.
 
-        When running in EveryVoice mode and a preprocessed ood.psv exists in the
-        preprocessed directory (written by ``everyvoice preprocess text-to-wav
-        --ood-data-file``), use it so that OOD tokens are consistent with the
-        training vocabulary and G2P configuration.  Otherwise fall back to the
-        raw OOD text file specified in the config.
+        Returns ``(ood_data_paths, ood_val_list)`` where exactly one is non-empty/non-None:
+
+        * ``ood_data_paths``: maps language code → path to a preprocessed ``{lang}.psv``
+          file under ``{preprocessed_dir}/ood/``.  Missing languages are silently omitted
+          (``FilePathDataset`` falls back to the combined pool).
+        * ``ood_val_list``: the validation filelist used as OOD fallback when
+          ``use_validation_as_ood=True`` and no preprocessed PSVs are found.
+
+        Raises ``ValueError`` when no preprocessed PSVs exist and
+        ``use_validation_as_ood`` is ``False``.
         """
-        if self.load_for_everyvoice and self._preprocessed_dir is not None:
-            ood_psv = Path(self._preprocessed_dir) / "ood.psv"
-            if ood_psv.exists():
-                return str(ood_psv)
-        return dp["OOD_data"]
+        from loguru import logger
+
+        ev_cfg = self.config["ev_config"]
+        ood_raw_data = ev_cfg.training.ood_raw_data
+        use_val_fallback = ev_cfg.training.use_validation_as_ood
+
+        ood_data_paths: dict[str, Path] = {}
+        if self._preprocessed_dir is not None:
+            ood_dir = Path(self._preprocessed_dir) / "ood"
+            for lang in ood_raw_data:
+                psv = ood_dir / f"{lang}.psv"
+                if psv.exists():
+                    ood_data_paths[lang] = psv
+
+        if ood_data_paths:
+            return ood_data_paths, None
+
+        if use_val_fallback:
+            logger.warning(
+                "No preprocessed OOD data found under '%s/ood/'. "
+                "Falling back to the validation split as OOD reference text. "
+                "This pollutes the train/validation split — do not use when "
+                "reporting research results. To silence this warning, run "
+                "'everyvoice preprocess text-to-wav' with ood_raw_data configured.",
+                self._preprocessed_dir,
+            )
+            return {}, self.val_list
+
+        raise ValueError(
+            "No preprocessed OOD data found and use_validation_as_ood is False. "
+            "Either run 'everyvoice preprocess text-to-wav' after configuring "
+            "training.ood_raw_data in your config, or set "
+            "training.use_validation_as_ood: true to fall back to the validation split."
+        )
 
     def train_dataloader(self):
         dp = self.config["data_params"]
+        ood_kwargs: dict = {}
+        if self.load_for_everyvoice:
+            ood_paths, ood_val = self._resolve_ood_sources()
+            ood_kwargs = {"ood_data_paths": ood_paths, "ood_val_list": ood_val}
+        else:
+            ood_kwargs = {"OOD_data": dp.get("OOD_data", "data/OOD_texts.txt")}
         return build_dataloader(
             self.train_list,
             dp["root_path"],
@@ -128,14 +168,20 @@ class StyleTTS2DataModule(L.LightningDataModule):
             output_sampling_rate=self._output_sampling_rate,
             ev_text_config=self._ev_text_config,
             pretrained_symbols=self._pretrained_symbols,
-            OOD_data=self._ood_data_path(dp),
             min_length=dp["min_length"],
             batch_size=self.config.get("batch_size", 16),
             num_workers=2,
+            **ood_kwargs,
         )
 
     def val_dataloader(self):
         dp = self.config["data_params"]
+        ood_kwargs: dict = {}
+        if self.load_for_everyvoice:
+            ood_paths, ood_val = self._resolve_ood_sources()
+            ood_kwargs = {"ood_data_paths": ood_paths, "ood_val_list": ood_val}
+        else:
+            ood_kwargs = {"OOD_data": dp.get("OOD_data", "data/OOD_texts.txt")}
         return build_dataloader(
             self.val_list,
             dp["root_path"],
@@ -144,11 +190,11 @@ class StyleTTS2DataModule(L.LightningDataModule):
             output_sampling_rate=self._output_sampling_rate,
             ev_text_config=self._ev_text_config,
             pretrained_symbols=self._pretrained_symbols,
-            OOD_data=self._ood_data_path(dp),
             min_length=dp["min_length"],
             batch_size=self.config.get("batch_size", 16),
             validation=True,
             num_workers=0,
+            **ood_kwargs,
         )
 
 

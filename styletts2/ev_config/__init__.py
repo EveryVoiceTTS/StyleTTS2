@@ -10,7 +10,10 @@ from everyvoice.config.shared_types import (
     init_context,
 )
 from everyvoice.config.text_config import TextConfig
-from everyvoice.config.type_definitions import TargetTrainingTextRepresentationLevel
+from everyvoice.config.type_definitions import (
+    DatasetTextRepresentation,
+    TargetTrainingTextRepresentationLevel,
+)
 from everyvoice.config.utils import PossiblyRelativePath, load_partials
 from everyvoice.model.vocoder.HiFiGAN_iSTFT_lightning.hfgl.config import (
     HiFiGANModelConfig,
@@ -132,6 +135,64 @@ class StyleTTS2PLBERTConfig(ConfigModel):
     @classmethod
     def expand_local_paths(cls, v: Any) -> Any:
         return _expand_local_path(v)
+
+
+# ---------------------------------------------------------------------------
+# OOD data sources
+# ---------------------------------------------------------------------------
+
+
+class OODDataHFSource(ConfigModel):
+    """A HuggingFace-hosted OOD text file."""
+
+    repo_id: str = Field(
+        description="HuggingFace repository ID, e.g. 'everyvoice/ood-english'."
+    )
+    filename: str = Field(
+        default="ood.txt", description="Filename within the repository."
+    )
+    revision: Optional[str] = Field(
+        default=None, description="Git revision (branch, tag, or commit SHA) to pin."
+    )
+
+
+class OODDataSource(ConfigModel):
+    """A single per-language OOD data source — either a local file or a HuggingFace repo file."""
+
+    local_path: Optional[PossiblyRelativePath] = Field(
+        default=None,
+        description="Path to a local plain-text file (one utterance per line).",
+    )
+    hf: Optional[OODDataHFSource] = Field(
+        default=None,
+        description="HuggingFace-hosted file to download via huggingface_hub.",
+    )
+    text_representation: DatasetTextRepresentation = Field(
+        default=DatasetTextRepresentation.characters,
+        description=(
+            "The text representation of the source data. "
+            "Use 'characters' if the file contains raw text (G2P will be applied if available). "
+            "Use 'phones' if already IPA-transcribed (G2P skipped). "
+            "Use 'arpabet' if in ARPAbet notation (converted to IPA, G2P skipped)."
+        ),
+    )
+
+    @field_validator("local_path", mode="before")
+    @classmethod
+    def expand_local_path(cls, v: Any) -> Any:
+        return _expand_local_path(v)
+
+    @model_validator(mode="after")
+    def check_exactly_one_source(self) -> "OODDataSource":
+        if self.local_path is None and self.hf is None:
+            raise ValueError(
+                "Exactly one of 'local_path' or 'hf' must be set on OODDataSource."
+            )
+        if self.local_path is not None and self.hf is not None:
+            raise ValueError(
+                "Only one of 'local_path' or 'hf' may be set on OODDataSource."
+            )
+        return self
 
 
 class StyleTTS2PretrainedConfig(ConfigModel):
@@ -436,10 +497,22 @@ class StyleTTS2TrainingConfig(BaseTrainingConfig):
         validate_default=True,
         description="Root directory that audio file paths in the filelist are relative to.",
     )
-    ood_data: PossiblyRelativePath = Field(
-        default="data/OOD_texts.txt",
-        validate_default=True,
-        description="Path to out-of-distribution texts used for validation audio generation.",
+    ood_raw_data: dict[str, OODDataSource] = Field(
+        default_factory=dict,
+        description=(
+            "Per-language sources of raw OOD text, keyed by ISO language code (e.g. 'eng'). "
+            "Each source is a local plain-text file or a HuggingFace repo file. "
+            "Run 'everyvoice preprocess text-to-wav' to tokenize these into "
+            "{preprocessing.save_dir}/ood/{lang}.psv before training."
+        ),
+    )
+    use_validation_as_ood: bool = Field(
+        default=False,
+        description=(
+            "Fall back to the validation split as OOD reference text when no preprocessed "
+            "OOD data is found. Acceptable in applied settings but pollutes the train/val "
+            "split — do not use when reporting research results."
+        ),
     )
     min_length: int = Field(
         default=50,

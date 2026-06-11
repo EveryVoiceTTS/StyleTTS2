@@ -1,6 +1,5 @@
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 import typer
 from everyvoice.base_cli.interfaces import preprocess_base_command_interface
@@ -20,13 +19,6 @@ def preprocess(
         "--steps",
         help="Which preprocessing steps to run. If none are provided, text and audio processing steps are performed.",
     ),
-    ood_data_file: Optional[Path] = typer.Option(
-        None,
-        "--ood-data-file",
-        exists=True,
-        help="Path to a plain-text OOD file (one utterance per line) to preprocess alongside the main data. "
-        "Produces ood.psv in the preprocessed output directory, which is used automatically during training.",
-    ),
     **kwargs,
 ):
     """Preprocess audio and text data for StyleTTS2 training."""
@@ -35,13 +27,31 @@ def preprocess(
     with spinner():
         from everyvoice.base_cli.helpers import preprocess_base_command
 
-        from ..ev_config import (
-            StyleTTS2Config,
-        )
+        from ..ev_config import StyleTTS2Config
 
-    preprocess_base_command(
+    preprocessor, config, _ = preprocess_base_command(
         model_config=StyleTTS2Config,
         steps=[step.name for step in steps],
-        ood_data_file=ood_data_file,
         **kwargs,
     )
+
+    if not config.training.ood_raw_data:
+        return
+
+    resolved: dict[str, tuple[Path, object]] = {}
+    for lang, source in config.training.ood_raw_data.items():
+        if source.hf is not None:
+            from huggingface_hub import hf_hub_download
+
+            local_path = Path(
+                hf_hub_download(
+                    source.hf.repo_id,
+                    filename=source.hf.filename,
+                    revision=source.hf.revision,
+                )
+            )
+        else:
+            local_path = source.local_path
+        resolved[lang] = (local_path, source.text_representation)
+
+    preprocessor.preprocess_ood(resolved)

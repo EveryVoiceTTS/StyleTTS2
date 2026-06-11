@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os.path as osp
 import random
 from pathlib import Path
@@ -12,6 +11,7 @@ import pandas as pd
 import soundfile as sf
 import torch
 import torchaudio  # noqa: F401 (kept for downstream imports)
+from loguru import logger
 from torch.utils.data import DataLoader
 
 from .text_utils import TextCleaner
@@ -19,8 +19,6 @@ from .utils import MEL_MEAN, MEL_STD, make_mel_transform
 
 if TYPE_CHECKING:
     from everyvoice.config.text_config import TextConfig
-
-logger = logging.getLogger(__name__)
 
 np.random.seed(1)
 random.seed(1)
@@ -57,6 +55,8 @@ class FilePathDataset(torch.utils.data.Dataset):
         validation=False,
         OOD_data="data/OOD_texts.txt",
         min_length=50,
+        ood_data_paths: "dict[str, Any] | None" = None,
+        ood_val_list: "list[dict] | None" = None,
     ):
         pp = config["preprocess_params"]
         self.sr = pp.get("sr", 24000)
@@ -109,26 +109,72 @@ class FilePathDataset(torch.utils.data.Dataset):
         self.silence_pad_samples = pp.get("silence_pad_samples", 5000)
         self.min_length = min_length
 
-        # Load OOD texts. If the path points to a preprocessed .psv filelist
-        # (written by `everyvoice preprocess text-to-wav --ood-data-file`),
-        # store dicts and use the EveryVoice token columns. Otherwise fall
-        # back to the original plain-text / pipe-separated loading.
-        if Path(OOD_data).suffix == ".psv":
-            from everyvoice.utils import generic_psv_filelist_reader
-
-            self.ptexts: list[Any] = generic_psv_filelist_reader(OOD_data)
-            self._ood_preprocessed = True
+        # OOD texts: EV mode uses per-language PSV files; original mode uses
+        # the legacy plain-text OOD_data path.
+        if self.preprocessed_dir is not None:
+            self.ood_texts: dict[str, list[tuple[str, list[int]]]] = {}
+            self._load_ood_ev(ood_data_paths, ood_val_list)
+            # Flat pool used when the current utterance's language has no OOD entry.
+            self._ood_fallback_pool: list[tuple[str, list[int]]] = [
+                item for items in self.ood_texts.values() for item in items
+            ]
         else:
             with open(OOD_data, "r", encoding="utf-8") as f:
                 tl = f.readlines()
             idx = 1 if ".wav" in tl[0].split("|")[0] else 0
-            self.ptexts = [t.split("|")[idx] for t in tl]
-            self._ood_preprocessed = False
+            self.ptexts: list[str] = [t.split("|")[idx] for t in tl]
 
         self.root_path = root_path
 
     def __len__(self):
         return len(self.data_list)
+
+    # ------------------------------------------------------------------
+    # OOD loading helper (EV mode)
+    # ------------------------------------------------------------------
+
+    def _load_ood_ev(
+        self,
+        ood_data_paths: "dict[str, Any] | None",
+        ood_val_list: "list[dict] | None",
+    ) -> None:
+        """Populate self.ood_texts from per-language PSV paths or a val-fallback list."""
+        from everyvoice.utils import generic_psv_filelist_reader
+
+        # Collect raw PSV rows per language from whichever source was provided.
+        source_rows: dict[str, list[dict]] = {}
+        if ood_data_paths:
+            for lang, path in ood_data_paths.items():
+                source_rows[lang] = generic_psv_filelist_reader(path)
+        elif ood_val_list is not None:
+            for item in ood_val_list:
+                lang = item.get("language", "und")
+                source_rows.setdefault(lang, []).append(item)
+
+        warned_langs: set[str] = set()
+        for lang, rows in source_rows.items():
+            lang_texts: list[tuple[str, list[int]]] = []
+            for row in rows:
+                token_str = row.get(self._token_column, "")
+                if not token_str:
+                    continue
+                raw_text = row.get("characters", row.get("phones", ""))
+                if self._ev_encoder is not None:
+                    indices = self._ev_encoder.encode_token_sequence(token_str)
+                else:
+                    indices = self.text_cleaner(raw_text)
+                if indices:
+                    lang_texts.append((raw_text, indices))
+            if lang_texts:
+                self.ood_texts[lang] = lang_texts
+            elif lang not in warned_langs:
+                warned_langs.add(lang)
+                logger.warning(
+                    "OOD data for language '%s': column '%s' is absent or empty in all rows — "
+                    "this language will fall back to the combined OOD pool.",
+                    lang,
+                    self._token_column,
+                )
 
     # ------------------------------------------------------------------
     # EveryVoice-mode helpers
@@ -256,30 +302,26 @@ class FilePathDataset(torch.utils.data.Dataset):
         length_feature = acoustic_feature.size(1)
         acoustic_feature = acoustic_feature[:, : (length_feature - length_feature % 2)]
 
-        # OOD text — sampled from either the preprocessed ood.psv (EveryVoice
-        # mode) or the original plain-text file (original mode).
-        # TODO: For multilingual models, prefer OOD items whose language column
-        #   matches the current training utterance so each language hears
-        #   language-appropriate reference text during validation.
-        ps_text = ""
-        while len(ps_text) < self.min_length:
-            rand_idx = np.random.randint(0, len(self.ptexts) - 1)
-            ood_item = self.ptexts[rand_idx]
-
-            if self._ood_preprocessed:
-                ps_text = ood_item.get("characters", "")
-                if self._ev_encoder is not None:
-                    token_str = ood_item.get(self._token_column, "")
-                    indices = self._ev_encoder.encode_token_sequence(token_str)
-                else:
-                    indices = self.text_cleaner(ps_text)
+        # OOD reference text — language-keyed in EV mode, plain-text pool in original mode.
+        if self.preprocessed_dir is not None:
+            lang = data.get("language", "und") if isinstance(data, dict) else "und"
+            pool = self.ood_texts.get(lang) or self._ood_fallback_pool
+            if not pool:
+                # No OOD data at all — use training text as a last resort.
+                ref_text = text_tensor
             else:
-                ps_text = ood_item
+                ps_text = ""
+                while len(ps_text) < self.min_length:
+                    rand_idx = np.random.randint(0, len(pool))
+                    ps_text, indices = pool[rand_idx % len(pool)]
+                ref_text = torch.LongTensor([0] + list(indices) + [0])
+        else:
+            ps_text = ""
+            while len(ps_text) < self.min_length:
+                rand_idx = np.random.randint(0, len(self.ptexts) - 1)
+                ps_text = self.ptexts[rand_idx]
                 indices = self.text_cleaner(ps_text)
-
-            indices.insert(0, 0)
-            indices.append(0)
-            ref_text = torch.LongTensor(indices)
+            ref_text = torch.LongTensor([0] + list(indices) + [0])
 
         return (
             speaker_id,
@@ -388,6 +430,8 @@ def build_dataloader(
     device="cpu",
     collate_config={},
     dataset_config={},
+    ood_data_paths=None,
+    ood_val_list=None,
 ):
     max_mel_length = config["preprocess_params"].get("max_mel_length", 192)
     dataset = FilePathDataset(
@@ -402,6 +446,8 @@ def build_dataloader(
         OOD_data=OOD_data,
         min_length=min_length,
         validation=validation,
+        ood_data_paths=ood_data_paths,
+        ood_val_list=ood_val_list,
         **dataset_config,
     )
     collate_fn = Collater(max_mel_length=max_mel_length, **collate_config)

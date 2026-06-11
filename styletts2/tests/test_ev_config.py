@@ -1,8 +1,21 @@
 """Tests for the EveryVoice ↔ StyleTTS2 config/text integration."""
 
+import contextlib
 import unittest
 
+from loguru import logger
 from pydantic import ValidationError
+
+
+@contextlib.contextmanager
+def capture_loguru(level="WARNING"):
+    """Capture loguru messages at *level* or above; yields a list of message strings."""
+    messages = []
+    handler_id = logger.add(messages.append, level=level, format="{message}")
+    try:
+        yield messages
+    finally:
+        logger.remove(handler_id)
 
 
 class TestStyleTTS2PretrainedConfig(unittest.TestCase):
@@ -130,17 +143,17 @@ class TestEVStyleTTS2TextEncoder(unittest.TestCase):
         encoder, _ = self._make_encoder()
         paren_token = DEFAULT_PUNCTUATION_HASH["parentheses"]
         # <PAREN> has no StyleTTS2 equivalent — should be silently dropped
-        with self.assertLogs("styletts2.ev_config.text", level="WARNING") as cm:
+        with capture_loguru() as warnings:
             indices = encoder.encode_token_sequence(paren_token)
         self.assertEqual(indices, [])
-        self.assertTrue(any("no mapping" in msg for msg in cm.output))
+        self.assertTrue(any("no mapping" in msg for msg in warnings))
 
     def test_unknown_token_dropped_with_warning(self):
         encoder, _ = self._make_encoder()
-        with self.assertLogs("styletts2.ev_config.text", level="WARNING") as cm:
+        with capture_loguru() as warnings:
             indices = encoder.encode_token_sequence("<UNKNOWN_TOKEN_XYZ>")
         self.assertEqual(indices, [])
-        self.assertTrue(any("no mapping" in msg for msg in cm.output))
+        self.assertTrue(any("no mapping" in msg for msg in warnings))
 
     def test_empty_token_sequence(self):
         encoder, _ = self._make_encoder()
@@ -153,7 +166,7 @@ class TestEVStyleTTS2TextEncoder(unittest.TestCase):
         encoder, symbols = self._make_encoder()
         paren_token = DEFAULT_PUNCTUATION_HASH["parentheses"]
         # "h / <PAREN> / e" — PAREN should be dropped, h and e kept
-        with self.assertLogs("styletts2.ev_config.text", level="WARNING"):
+        with capture_loguru():
             indices = encoder.encode_token_sequence(f"h/{paren_token}/e")
         self.assertEqual(len(indices), 2)
         self.assertEqual(symbols[indices[0]], "h")
