@@ -1,14 +1,12 @@
 import typer
+from everyvoice.base_cli import default_typer_args
 from everyvoice.wizard import TEXT_TO_WAV_CONFIG_FILENAME_PREFIX
 
 from .preprocess import preprocess as app_preprocess
 from .train import train as app_train
 
 app = typer.Typer(
-    pretty_exceptions_show_locals=False,
-    no_args_is_help=True,
-    context_settings={"help_option_names": ["-h", "--help"]},
-    rich_markup_mode="markdown",
+    **default_typer_args,
     help="A StyleTTS2 end-to-end text-to-speech model configured via EveryVoice.",
 )
 
