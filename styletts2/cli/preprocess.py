@@ -46,6 +46,7 @@ def preprocess(
             local_path = Path(
                 hf_hub_download(
                     source.hf.repo_id,
+                    repo_type="dataset",
                     filename=source.hf.filename,
                     revision=source.hf.revision,
                 )
