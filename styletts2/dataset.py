@@ -54,7 +54,7 @@ class FilePathDataset(torch.utils.data.Dataset):
         data_augmentation=False,
         validation=False,
         OOD_data="data/OOD_texts.txt",
-        min_length=50,
+        OOD_min_length=50,
         ood_data_paths: "dict[str, Any] | None" = None,
         ood_val_list: "list[dict] | None" = None,
     ):
@@ -107,7 +107,7 @@ class FilePathDataset(torch.utils.data.Dataset):
         self.data_augmentation = data_augmentation and (not validation)
         self.max_mel_length = pp.get("max_mel_length", 192)
         self.silence_pad_samples = pp.get("silence_pad_samples", 5000)
-        self.min_length = min_length
+        self.OOD_min_length = OOD_min_length
 
         # OOD texts: EV mode uses per-language PSV files; original mode uses
         # the legacy plain-text OOD_data path.
@@ -308,26 +308,26 @@ class FilePathDataset(torch.utils.data.Dataset):
             pool = self.ood_texts.get(lang) or self._ood_fallback_pool
             if not pool:
                 # No OOD data at all — use training text as a last resort.
-                ref_text = text_tensor
+                ref_text_ood = text_tensor
             else:
                 ps_text = ""
-                while len(ps_text) < self.min_length:
+                while len(ps_text) < self.OOD_min_length:
                     rand_idx = np.random.randint(0, len(pool))
                     ps_text, indices = pool[rand_idx % len(pool)]
-                ref_text = torch.LongTensor([0] + list(indices) + [0])
+                ref_text_ood = torch.LongTensor([0] + list(indices) + [0])
         else:
             ps_text = ""
-            while len(ps_text) < self.min_length:
+            while len(ps_text) < self.OOD_min_length:
                 rand_idx = np.random.randint(0, len(self.ptexts) - 1)
                 ps_text = self.ptexts[rand_idx]
                 indices = self.text_cleaner(ps_text)
-            ref_text = torch.LongTensor([0] + list(indices) + [0])
+            ref_text_ood = torch.LongTensor([0] + list(indices) + [0])
 
         return (
             speaker_id,
             acoustic_feature,
             text_tensor,
-            ref_text,
+            ref_text_ood,
             ref_mel_tensor,
             ref_label,
             path,
@@ -424,7 +424,7 @@ def build_dataloader(
     pretrained_symbols=None,
     validation=False,
     OOD_data="data/OOD_texts.txt",
-    min_length=50,
+    OOD_min_length=50,
     batch_size=4,
     num_workers=1,
     device="cpu",
@@ -444,7 +444,7 @@ def build_dataloader(
         ev_text_config=ev_text_config,
         pretrained_symbols=pretrained_symbols,
         OOD_data=OOD_data,
-        min_length=min_length,
+        OOD_min_length=OOD_min_length,
         validation=validation,
         ood_data_paths=ood_data_paths,
         ood_val_list=ood_val_list,

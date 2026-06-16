@@ -70,7 +70,7 @@ def to_native_config(config: StyleTTS2Config) -> dict:
             "train_data": str(tr.training_filelist),
             "val_data": str(tr.validation_filelist),
             "root_path": str(tr.root_path),
-            "min_length": tr.min_length,
+            "OOD_min_length": tr.OOD_min_length,
             "target_text_representation": m.target_text_representation_level.value,
         },
         # --- audio preprocessing ---

@@ -143,7 +143,7 @@ class StyleTTS2PLBERTConfig(ConfigModel):
 
 
 class OODDataHFSource(ConfigModel):
-    """A HuggingFace-hosted OOD text file."""
+    """A HuggingFace-hosted out-of-distribution (OOD) text file."""
 
     repo_id: str = Field(
         description="HuggingFace repository ID, e.g. 'everyvoice/ood-english'."
@@ -157,7 +157,7 @@ class OODDataHFSource(ConfigModel):
 
 
 class OODDataSource(ConfigModel):
-    """A single per-language OOD data source — either a local file or a HuggingFace repo file."""
+    """A single per-language out-of-distribution (OOD) data source — either a local file or a HuggingFace repo file."""
 
     local_path: Optional[PossiblyRelativePath] = Field(
         default=None,
@@ -500,8 +500,8 @@ class StyleTTS2TrainingConfig(BaseTrainingConfig):
     ood_raw_data: dict[str, OODDataSource] = Field(
         default_factory=dict,
         description=(
-            "Per-language sources of raw OOD text, keyed by ISO language code (e.g. 'eng'). "
-            "Each source is a local plain-text file or a HuggingFace repo file. "
+            "Per-language sources of raw out-of-distribution (OOD) text, keyed by ISO language code (e.g. 'eng'). "
+            "Each source is a local plain-text file with a 'phones' or 'characters' header, or a HuggingFace repo file. "
             "Run 'everyvoice preprocess text-to-wav' to tokenize these into "
             "{preprocessing.save_dir}/ood/{lang}.psv before training."
         ),
@@ -509,12 +509,12 @@ class StyleTTS2TrainingConfig(BaseTrainingConfig):
     use_validation_as_ood: bool = Field(
         default=False,
         description=(
-            "Fall back to the validation split as OOD reference text when no preprocessed "
+            "Fall back to the validation split as out-of-distribution (OOD) reference text when no preprocessed "
             "OOD data is found. Acceptable in applied settings but pollutes the train/val "
             "split — do not use when reporting research results."
         ),
     )
-    min_length: int = Field(
+    OOD_min_length: int = Field(
         default=50,
         description="Minimum text length (characters) when sampling OOD validation texts.",
     )

@@ -103,7 +103,7 @@ Checkpoints and TensorBoard logs are saved under `log_dir` as configured in the 
 In `configs/base.yml` (and the other config files):
 
 - `OOD_data`: path to out-of-distribution texts for SLM adversarial training
-- `min_length`: minimum OOD text length; ensures synthesized speech has a minimum duration
+- `OOD_min_length`: minimum OOD text length; ensures synthesized speech has a minimum duration
 - `max_len`: maximum training audio length in frames (hop size 300 → ~0.0125 s/frame); reduce if you hit OOM
 - `multispeaker`: set `true` for multi-speaker models (changes the denoiser architecture)
 - `batch_percentage`: fraction of the batch used for SLM adversarial steps; reduce if you hit OOM during Stage 2
