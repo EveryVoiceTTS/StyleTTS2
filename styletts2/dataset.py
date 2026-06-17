@@ -308,13 +308,28 @@ class FilePathDataset(torch.utils.data.Dataset):
             pool = self.ood_texts.get(lang) or self._ood_fallback_pool
             if not pool:
                 # No OOD data at all — use training text as a last resort.
+                logger.warning(
+                    "No OOD data available. "
+                    "We will use the available training data as text input, "
+                    "but your model will be less robust as a result. "
+                    "Please add OOD data to your configuration, preprocess, and train again. ",
+                )
                 ref_text_ood = text_tensor
             else:
                 ps_text = ""
-                while len(ps_text) < self.OOD_min_length:
-                    rand_idx = np.random.randint(0, len(pool))
-                    ps_text, indices = pool[rand_idx % len(pool)]
-                ref_text_ood = torch.LongTensor([0] + list(indices) + [0])
+                all_indices: list[int] = []
+                # TODO: consider joining with punctuation instead of just whitespace
+                space_idx = self.text_cleaner(" ")[0]
+                for _ in range(max(len(pool) * 2, 100)):
+                    if len(ps_text) >= self.OOD_min_length:
+                        break
+                    sample_text, sample_indices = pool[np.random.randint(0, len(pool))]
+                    if ps_text:
+                        ps_text += " "
+                        all_indices.append(space_idx)
+                    ps_text += sample_text
+                    all_indices.extend(sample_indices)
+                ref_text_ood = torch.LongTensor([0] + list(all_indices) + [0])
         else:
             ps_text = ""
             while len(ps_text) < self.OOD_min_length:
