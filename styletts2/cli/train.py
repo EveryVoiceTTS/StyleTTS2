@@ -111,6 +111,8 @@ def train(
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
     devices = kwargs.get("devices", "auto")
+    if devices == "auto":
+        devices = os.environ.get("SLURM_GPUS_ON_NODE", "auto")
     strategy = kwargs.get("strategy", "ddp")
 
     # GAN training uses separate discriminator/generator backward passes,
