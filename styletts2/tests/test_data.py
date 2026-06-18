@@ -1,6 +1,9 @@
 """Tests for OOD text sampling in FilePathDataset.__getitem__."""
 
+import os
 import signal
+import threading
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -8,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 
 from styletts2.dataset import FilePathDataset
@@ -20,16 +24,36 @@ _OOD_PSV = Path(__file__).parent / "test_validation_ood.psv"
 
 @contextmanager
 def _time_limit(seconds=5):
-    def _handler(signum, frame):
-        raise TimeoutError(f"OOD sampling did not terminate within {seconds}s")
+    if os.name != "nt":
+        # Linux or macOS; more efficient, interrupts a test exceeding its time
 
-    old_handler = signal.signal(signal.SIGALRM, _handler)
-    signal.alarm(seconds)
-    try:
-        yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
+        def _handler(signum, frame):
+            raise TimeoutError(f"OOD sampling did not terminate within {seconds}s")
+
+        old_handler = signal.signal(signal.SIGALRM, _handler)
+        signal.alarm(seconds)
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+    else:
+        # Windows fallback, where SIGALRM is not implemented; has to wait until the test
+        # is done, we can only detect that it went overtime, not interrupt it.
+        timed_out = False
+
+        def _windows_handler():
+            nonlocal timed_out
+            timed_out = True
+
+        timer = threading.Timer(seconds, _windows_handler)
+        timer.start()
+        try:
+            yield
+        finally:
+            timer.cancel()
+            if timed_out:
+                raise TimeoutError(f"OOD sampling did not terminate within {seconds}s")
 
 
 def _dummy_tensors():
@@ -81,6 +105,15 @@ class TestOODSamplingEVMode(unittest.TestCase):
         inner = ref_text_ood[1:-1].tolist()  # strip leading/trailing boundary 0
         self.assertGreater(len(inner), 5)
         self.assertIn(_SPACE_IDX, inner)
+
+    def test_timer_passes(self):
+        with _time_limit(1):
+            pass
+
+    def test_timer_exceeded(self):
+        with pytest.raises(TimeoutError):
+            with _time_limit(1):
+                time.sleep(2)
 
 
 class TestOODIndicesFromPSV(unittest.TestCase):
