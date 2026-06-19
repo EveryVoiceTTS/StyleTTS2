@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
-from everyvoice.base_cli import default_typer_args
+from everyvoice.base_cli import command, default_typer_args
 from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.type_definitions import (
     SynthesizeOutputFormats,
 )
@@ -114,7 +114,8 @@ def synthesize_one(
 app = typer.Typer(**default_typer_args)
 
 
-@app.command(
+@command(
+    app,
     name="text-to-wav",
     short_help="Synthesize audio from text using a trained StyleTTS2 model",
 )

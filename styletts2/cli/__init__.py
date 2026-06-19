@@ -1,5 +1,5 @@
 import typer
-from everyvoice.base_cli import default_typer_args
+from everyvoice.base_cli import command, default_typer_args
 from everyvoice.wizard import TEXT_TO_WAV_CONFIG_FILENAME_PREFIX
 
 from .preprocess import preprocess as app_preprocess
@@ -10,7 +10,8 @@ app = typer.Typer(
     help="A StyleTTS2 end-to-end text-to-speech model configured via EveryVoice.",
 )
 
-app.command(
+command(
+    app,
     name="preprocess",
     short_help="Preprocess your data",
     help=f"""Preprocess your data for StyleTTS2 training. For example:
@@ -19,7 +20,8 @@ app.command(
     """,
 )(app_preprocess)
 
-app.command(
+command(
+    app,
     name="train",
     short_help="Train your StyleTTS2 model",
     help=f"""Train a StyleTTS2 end-to-end model. For example:
