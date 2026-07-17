@@ -8,6 +8,7 @@ from typing import Optional, Sequence
 import lightning as L
 import torch
 import torchaudio
+from everyvoice import logger
 from everyvoice.base_cli.prediction_writing_callback import (
     BasePredictionWritingCallback,
 )
@@ -18,7 +19,6 @@ from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.utils import 
     truncate_basename,
 )
 from everyvoice.utils import slugify
-from loguru import logger
 from torch.utils.data import DataLoader, Dataset
 
 

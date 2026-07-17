@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from everyvoice import logger
 from everyvoice.base_cli import command, default_typer_args
 from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.type_definitions import (
     SynthesizeOutputFormats,
@@ -203,7 +204,6 @@ def synthesize(
         truncate_basename,
     )
     from everyvoice.utils import slugify
-    from loguru import logger
 
     from .utils_heavy import (
         StyleTTS2SynthesisDataModule,

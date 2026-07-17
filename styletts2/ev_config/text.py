@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from everyvoice import logger
 from everyvoice.text.features import DEFAULT_PUNCTUATION_HASH
-from loguru import logger
 
 if TYPE_CHECKING:
     from everyvoice.config.text_config import TextConfig

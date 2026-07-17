@@ -11,7 +11,7 @@ import pandas as pd
 import soundfile as sf
 import torch
 import torchaudio  # noqa: F401 (kept for downstream imports)
-from loguru import logger
+from everyvoice import logger
 from torch.utils.data import DataLoader
 
 from .text_utils import TextCleaner

@@ -7,6 +7,7 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
+from everyvoice import logger
 from monotonic_align import mask_from_lens
 from munch import Munch
 from torch.optim import AdamW
@@ -117,7 +118,6 @@ class StyleTTS2DataModule(L.LightningDataModule):
         Raises ``ValueError`` when no preprocessed PSVs exist and
         ``use_validation_as_ood`` is ``False``.
         """
-        from loguru import logger
 
         ev_cfg = self.config["ev_config"]
         ood_raw_data = ev_cfg.training.ood_raw_data
