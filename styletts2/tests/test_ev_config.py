@@ -173,7 +173,10 @@ class TestSymbolSubsetValidator(unittest.TestCase):
 
     def test_validator_rejects_unknown_symbol(self):
         """A symbol not in the pretrained table should raise ValidationError,
-        including a suggested closest pretrained replacement."""
+        pointing the user at `everyvoice check pretrained-symbols` for suggested
+        substitutions rather than computing them here (that requires
+        numpy/scipy/panphon, which this validator must not import — it runs
+        on every StyleTTS2Config instantiation, not just broken ones)."""
         from styletts2.ev_config import StyleTTS2Config
 
         # Korean character definitely not in StyleTTS2's Latin+IPA table
@@ -182,11 +185,11 @@ class TestSymbolSubsetValidator(unittest.TestCase):
             StyleTTS2Config(text=bad_text, **_CONTACT)
         message = str(ctx.value)
         assert "가" in message
-        assert "closest to" in message
+        assert "everyvoice check pretrained-symbols" in message
 
     def test_validator_rejects_diphthong_not_in_pretrained(self):
         """A multi-character diphthong like 'oʊ' is not in the pretrained table,
-        and the error still includes a suggested closest pretrained replacement."""
+        and the error still points to `everyvoice check pretrained-symbols`."""
         from styletts2.ev_config import StyleTTS2Config
 
         bad_text = self._text_config_with_extra_symbols("oʊ")
@@ -194,23 +197,21 @@ class TestSymbolSubsetValidator(unittest.TestCase):
             StyleTTS2Config(text=bad_text, **_CONTACT)
         message = str(ctx.value)
         assert "oʊ" in message
-        assert "closest to" in message
+        assert "everyvoice check pretrained-symbols" in message
 
-    def test_validator_suggestion_does_not_collide_with_existing_symbol(self):
-        """A suggested replacement must never be a pretrained symbol the user
-        already has an exact-match declaration for, since that would alias two
-        distinct declared symbols onto the same pretrained embedding row."""
-        from styletts2.ev_config import StyleTTS2Config, StyleTTS2PretrainedConfig
+    def test_validator_does_not_import_utils_heavy(self):
+        """The validator must stay cheap: it must not trigger the
+        numpy/scipy/panphon import chain in everyvoice.text.utils_heavy, since
+        it runs on every StyleTTS2Config instantiation, not just broken ones."""
+        import sys
 
-        # 'ʃ' is an exact match; 'ʒ's only two candidate targets are 'p' and
-        # 'ʃ', and 'ʃ' is the phonetically closer one, but this pins
-        # down that 'ʃ' is never offered since it's already claimed.
-        # as a result, ʒ is suggested to map to p
-        text = self._text_config_with_extra_symbols("ʃ", "ʒ")
-        pretrained = StyleTTS2PretrainedConfig(pretrained_symbols=["p", "ʃ"])
-        with pytest.raises(ValidationError) as ctx:
-            StyleTTS2Config(text=text, pretrained=pretrained, **_CONTACT)
-        assert "'ʒ' is closest to 'p'" in str(ctx.value)
+        from styletts2.ev_config import StyleTTS2Config
+
+        sys.modules.pop("everyvoice.text.utils_heavy", None)
+        bad_text = self._text_config_with_extra_symbols("가")
+        with pytest.raises(ValidationError):
+            StyleTTS2Config(text=bad_text, **_CONTACT)
+        assert "everyvoice.text.utils_heavy" not in sys.modules
 
     def test_validator_accepts_valid_ipa_phones(self):
         """Single IPA phones in StyleTTS2's _letters_ipa set pass validation."""

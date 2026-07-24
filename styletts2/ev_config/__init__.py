@@ -600,39 +600,19 @@ class StyleTTS2Config(BaseModelWithContact):
     @model_validator(mode="after")
     def check_symbols_in_pretrained(self) -> "StyleTTS2Config":
         from everyvoice.text.text_processor import TextProcessor
-        from everyvoice.text.utils_heavy import suggest_symbol_mapping
+        from everyvoice.text.utils import declared_content_symbols
 
         tp = TextProcessor(self.text)
-        pretrained_symbols = self.pretrained.pretrained_symbols
-        pretrained_set = set(pretrained_symbols)
-        # Only validate user-declared content symbols (letters, IPA phones, etc.).
-        # Internal punctuation tokens (<EXCL>, <COMMA>, …) are handled by the
-        # EVStyleTTS2TextEncoder remapping layer and don't need to be in the
-        # pretrained table.  <SIL> is dropped silently at encode time.
-        _skip = {tp._pad_symbol, "<SIL>"}
-        _skip |= set(tp.punctuation_internal_hash.values())
-        ev_symbols = set(
-            [s for s in tp.config.symbols.all_except_punctuation if s not in _skip]
-        )
-        missing = ev_symbols - pretrained_set
+        pretrained_set = set(self.pretrained.pretrained_symbols)
+        ev_symbols = declared_content_symbols(tp)
+        missing = [s for s in ev_symbols if s not in pretrained_set]
         if missing:
-            # Pass the full ev_symbols (not just missing) so suggest_symbol_mapping
-            # knows which pretrained symbols are already claimed by the user's own
-            # exact matches, and never suggests aliasing a missing symbol onto one
-            # of them.
-            result = suggest_symbol_mapping(ev_symbols, pretrained_symbols)
-            suggestions = "; ".join(
-                f"{symbol!r} is closest to {result.suggestions[symbol]!r} "
-                f"(distance={result.distances[symbol]:.2f})"
-                for symbol in missing
-                if symbol in result.suggestions
-            )
             raise ValueError(
                 f"The following symbols declared in your TextConfig are not present in "
                 f"the pretrained StyleTTS2 text-encoder symbol table: {missing}. "
-                f"Either remove them from your TextConfig, use a custom pretrained_symbols "
-                f"list, or add 'to_replace' rules to substitute them for symbols the "
-                f"pretrained encoder does know. Closest pretrained symbols: {suggestions}."
+                f"Change them in your text, remove them from your TextConfig, or run "
+                f"'everyvoice check pretrained-symbols --config <this config>' to get "
+                f"suggested 'to_replace' substitutions for the closest pretrained symbols."
             )
         return self
 
