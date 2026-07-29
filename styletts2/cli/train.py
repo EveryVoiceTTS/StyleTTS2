@@ -85,7 +85,7 @@ def train(
 
     tb_logger = TensorBoardLogger(save_dir=log_dir, name="tensorboard", version="")
 
-    ckpt_filename = f"epoch_{mode.value[0]}_" + "{epoch:05d}"
+    ckpt_filename = f"epoch_{mode.value}_" + "{epoch:05d}"
     # Always keep the last checkpoint regardless of performance.
     last_ckpt_callback = ModelCheckpoint(
         dirpath=log_dir,
