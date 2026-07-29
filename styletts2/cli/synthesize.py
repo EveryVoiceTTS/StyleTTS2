@@ -194,7 +194,7 @@ def synthesize(
 
     Example:
 
-    **everyvoice synthesize text-to-wav logs_and_checkpoints/.../last.ckpt \\
+    **everyvoice synthesize text-to-wav logs_and_checkpoints/.../stage-2-last.ckpt \\
         --reference path/to/reference.wav \\
         --text "Hello world" --text "How are you?"**
     """

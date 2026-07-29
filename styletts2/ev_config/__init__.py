@@ -481,8 +481,9 @@ class StyleTTS2TrainingConfig(BaseTrainingConfig):
         description="Maximum clip length in Mel frames used during training. You can lower this or your batch size if you run into out-of-memory errors. Advanced: In time, this is equal to max_len * (hop_length / sampling rate). e.g. with a max_len of 800, a hop length of 300 and a sampling rate of 24kHz, this is equal to ten seconds (800 * (300 / 24000)).",
     )
     first_stage_path: str = Field(
-        default="first_stage.pth",
-        description="Filename (relative to log_dir) where the stage 1 checkpoint is saved.",
+        default="stage-1-last.ckpt",
+        description="Filename (relative to log_dir) where the stage 1 checkpoint is saved. "
+        "The default matches the checkpoint '--mode first' training produces automatically.",
     )
     second_stage_load_pretrained: bool = Field(
         default=True,

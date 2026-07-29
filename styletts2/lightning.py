@@ -314,6 +314,10 @@ class StyleTTS2Module(L.LightningModule):
             "pretrained_model", ""
         ):
             first_stage_path = self.config.get("first_stage_path", "")
+            if first_stage_path and not os.path.isabs(first_stage_path):
+                first_stage_path = os.path.join(
+                    self.config.get("log_dir", ""), first_stage_path
+                )
             if os.path.isfile(first_stage_path):
                 _ignore = {
                     "bert",

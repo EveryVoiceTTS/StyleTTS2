@@ -97,6 +97,14 @@ def train(
         enable_version_counter=True,
         save_on_train_epoch_end=True,
     )
+    # Stage 1 and stage 2 share the same log_dir; name the "last" checkpoint
+    # per-mode so stage 2 doesn't replace stage 1's checkpoint.
+    mode_ckpt_names = {
+        Mode.first: "stage-1-last",
+        Mode.second: "stage-2-last",
+        Mode.finetune: "finetune-last",
+    }
+    last_ckpt_callback.CHECKPOINT_NAME_LAST = mode_ckpt_names[mode]
     # Keep only the top-k checkpoints ranked by val/mel (lower is better).
     monitored_ckpt_callback = ModelCheckpoint(
         dirpath=log_dir,
