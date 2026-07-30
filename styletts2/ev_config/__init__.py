@@ -602,7 +602,10 @@ class StyleTTS2Config(BaseModelWithContact):
         from everyvoice.text.text_processor import TextProcessor
         from everyvoice.text.utils import declared_content_symbols
 
-        tp = TextProcessor(self.text)
+        tp = TextProcessor(
+            self.text,
+            target_text_representation_level=self.model.target_text_representation_level,
+        )
         pretrained_set = set(self.pretrained.pretrained_symbols)
         ev_symbols = declared_content_symbols(tp)
         missing = [s for s in ev_symbols if s not in pretrained_set]
