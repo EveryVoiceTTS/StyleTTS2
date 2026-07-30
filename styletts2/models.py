@@ -7,7 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import yaml
 from munch import Munch
-from torch.nn.utils import spectral_norm, weight_norm
+from torch.nn.utils import spectral_norm
+from torch.nn.utils.parametrizations import weight_norm
 
 from .modules.diffusion.diffusion import AudioDiffusionConditional
 from .modules.diffusion.modules import StyleTransformer1d, Transformer1d
@@ -649,7 +650,6 @@ class DurationEncoder(nn.Module):
                     num_layers=1,
                     batch_first=True,
                     bidirectional=True,
-                    dropout=dropout,
                 )
             )
             self.lstms.append(AdaLayerNorm(sty_dim, d_model))

@@ -6,7 +6,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import Conv1d, ConvTranspose1d
-from torch.nn.utils import remove_weight_norm, weight_norm
+from torch.nn.utils.parametrizations import weight_norm
+from torch.nn.utils.parametrize import remove_parametrizations
 
 from .utils import get_padding, init_weights
 
@@ -139,9 +140,9 @@ class AdaINResBlock1(torch.nn.Module):
 
     def remove_weight_norm(self):
         for layer in self.convs1:
-            remove_weight_norm(layer)
+            remove_parametrizations(layer, "weight")
         for layer in self.convs2:
-            remove_weight_norm(layer)
+            remove_parametrizations(layer, "weight")
 
 
 class SineGen(torch.nn.Module):
@@ -473,11 +474,11 @@ class Generator(torch.nn.Module):
     def remove_weight_norm(self):
         print("Removing weight norm...")
         for layer in self.ups:
-            remove_weight_norm(layer)
+            remove_parametrizations(layer, "weight")
         for layer in self.resblocks:
             layer.remove_weight_norm()
-        remove_weight_norm(self.conv_pre)
-        remove_weight_norm(self.conv_post)
+        remove_parametrizations(self.conv_pre, "weight")
+        remove_parametrizations(self.conv_post, "weight")
 
 
 class AdainResBlk1d(nn.Module):
