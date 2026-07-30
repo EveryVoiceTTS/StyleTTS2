@@ -987,8 +987,8 @@ class StyleTTS2Module(L.LightningModule):
             mel = mels[bib, :, : mel_input_length[bib]]
             ss.append(self.predictor_encoder(mel.unsqueeze(0).unsqueeze(1)))
             gs.append(self.style_encoder(mel.unsqueeze(0).unsqueeze(1)))
-        s_dur = torch.stack(ss).squeeze()
-        gs = torch.stack(gs).squeeze()
+        s_dur = torch.stack(ss).squeeze(1)
+        gs = torch.stack(gs).squeeze(1)
         s_trg = torch.cat([gs, s_dur], dim=-1).detach()
 
         bert_dur = self.bert(texts, attention_mask=(~text_mask).int())
@@ -1502,7 +1502,7 @@ class StyleTTS2Module(L.LightningModule):
             mel = mels[bib, :, : mel_input_length[bib]]
             ss.append(self.predictor_encoder(mel.unsqueeze(0).unsqueeze(1)))
             gs.append(self.style_encoder(mel.unsqueeze(0).unsqueeze(1)))
-        s_dur = torch.stack(ss).squeeze()
+        s_dur = torch.stack(ss).squeeze(1)
 
         bert_dur = self.bert(texts, attention_mask=(~text_mask).int())
         d_en = self.bert_encoder(bert_dur).transpose(-1, -2)
