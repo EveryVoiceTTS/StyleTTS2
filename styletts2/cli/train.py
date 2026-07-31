@@ -83,12 +83,26 @@ def train(
     os.makedirs(log_dir, exist_ok=True)
     shutil.copy(str(config_file), os.path.join(log_dir, config_file.name))
 
-    tb_logger = TensorBoardLogger(save_dir=log_dir, name="tensorboard", version="")
+    # Stage 1 and stage 2 share the same log_dir; give each mode its own
+    # tensorboard sub-run so stage 2's restarted step/epoch counters don't
+    # get drawn as a continuation of stage 1's curve.
+    mode_sub_dirs = {
+        Mode.first: "stage-1",
+        Mode.second: "stage-2",
+        Mode.finetune: "finetune",
+    }
+    tb_logger = TensorBoardLogger(
+        save_dir=tr.logger.save_dir,
+        name=tr.logger.name,
+        version=tr.logger.version,
+        sub_dir=mode_sub_dirs[mode],
+    )
 
+    ckpt_dir = os.path.join(log_dir, "checkpoints")
     ckpt_filename = f"epoch_{mode.value}_" + "{epoch:05d}"
     # Always keep the last checkpoint regardless of performance.
     last_ckpt_callback = ModelCheckpoint(
-        dirpath=log_dir,
+        dirpath=ckpt_dir,
         filename=ckpt_filename,
         save_top_k=1,
         save_last=True,
@@ -97,8 +111,8 @@ def train(
         enable_version_counter=True,
         save_on_train_epoch_end=True,
     )
-    # Stage 1 and stage 2 share the same log_dir; name the "last" checkpoint
-    # per-mode so stage 2 doesn't replace stage 1's checkpoint.
+    # Stage 1 and stage 2 share the same checkpoints dir; name the "last"
+    # checkpoint per-mode so stage 2 doesn't replace stage 1's checkpoint.
     mode_ckpt_names = {
         Mode.first: "stage-1-last",
         Mode.second: "stage-2-last",
@@ -107,7 +121,7 @@ def train(
     last_ckpt_callback.CHECKPOINT_NAME_LAST = mode_ckpt_names[mode]
     # Keep only the top-k checkpoints ranked by val/mel (lower is better).
     monitored_ckpt_callback = ModelCheckpoint(
-        dirpath=log_dir,
+        dirpath=ckpt_dir,
         filename=ckpt_filename,
         monitor="val/mel",
         mode="min",
