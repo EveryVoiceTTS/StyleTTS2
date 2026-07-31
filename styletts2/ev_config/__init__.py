@@ -459,15 +459,18 @@ class StyleTTS2TrainingConfig(BaseTrainingConfig):
     """Training hyperparameters for StyleTTS2.
 
     Inherits shared fields from BaseTrainingConfig: batch_size,
-    save_top_k_ckpts, ckpt_steps/ckpt_epochs, val_check_interval,
-    max_epochs/max_steps, finetune_checkpoint (→ pretrained_model),
-    training_filelist (→ data_params.train_data),
+    ckpt_steps/ckpt_epochs, val_check_interval, max_epochs/max_steps,
+    finetune_checkpoint (→ pretrained_model), training_filelist (→ data_params.train_data),
     validation_filelist (→ data_params.val_data), logger, and data workers.
     """
 
     batch_size: int = Field(
         default=2,
         description="The number of samples to include in each batch when training. If you are running out of memory, consider lowering your batch_size.",
+    )
+    save_top_k_ckpts: int = Field(
+        default=1,
+        description="The number of checkpoints to save. StyleTTS2 checkpoints are large, and automating the top-k checkpoints is difficult. For this reason, we typically only save the last checkpoint.",
     )
     # TODO: Do we even need stage 1 and stage 2 to be separated from the training routine now that multi-gpu training is possible?
     epochs_1st: int = Field(
