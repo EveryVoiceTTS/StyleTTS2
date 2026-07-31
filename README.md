@@ -1,13 +1,15 @@
-# EveryVoiceTTS fork of StyleTTS2
+# EveryVoice TTS fork of StyleTTS2
 
-This version of StyleTTS2 has been forked from https://github.com/yl4579/StyleTTS2 by
-the EveryVoiceTTS team at NRC for the purpose of:
- - Integrating it with EveryVoice
- - Making it faster
- - Making it easier to use, especially (but not only) for low-resource Indigenous languages.
+This version has been forked from https://github.com/yl4579/StyleTTS2 by the EveryVoice Team at the National Research Council of Canada to integrate it within the EveryVoice TTS. This was done to make it faster and easier to use, particularly (but not only) for under-resourced languages. You can still use this repo by itself, but it's recommended to use it as part of the [EveryVoice TTS Toolkit](https://everyvoice.ca)
 
-Typical installation of this fork is done by installing EveryVoice itself.
-See https://github.com/EveryVoiceTTS/EveryVoice
+Some of the key changes are as follows:
+
+- Training framework rewritten in PyTorch Lightning, and supporting multi-gpu training across both stages (`everyvoice train text-to-wav -h`)
+- Typed validated config system as part of the EveryVoice TTS toolkit
+- Pretrained backbones (JDC, ASR aligner, PL-BERT) are now sourced from HuggingFace-hub and have been scrubbed from this repo
+- Training multilingual models is now supported via the changes described in [Wang, Pine & Geng 2026](https://doi.org/10.18653/v1/2026.eacl-short.16)
+- A Gradio-based demo is now bundled by default in the EveryVoice TTS toolkit (`everyvoice demo -h`)
+- Some CLI tools to help map your language's symbols into the symbol set used by the PL-BERT text encoder (`everyvoice check pretrained-symbols -h`)
 
 # StyleTTS 2: Towards Human-Level Text-to-Speech through Style Diffusion and Adversarial Training with Large Speech Language Models
 
