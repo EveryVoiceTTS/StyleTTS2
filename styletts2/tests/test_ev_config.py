@@ -36,6 +36,13 @@ class TestStyleTTS2ModelConfig(unittest.TestCase):
             TargetTrainingTextRepresentationLevel.characters,
         )
 
+    def test_default_multilingual_fields(self):
+        from styletts2.ev_config import StyleTTS2ModelConfig
+
+        cfg = StyleTTS2ModelConfig()
+        self.assertFalse(cfg.multilingual)
+        self.assertEqual(cfg.language_embedding_dim, 64)
+
 
 _CONTACT = {"contact": {"contact_name": "Test", "contact_email": "test@test.com"}}
 
@@ -74,6 +81,17 @@ class TestToNativeConfig(unittest.TestCase):
         native = to_native_config(cfg)
         # TargetTrainingTextRepresentationLevel.ipa_phones.value == "phones"
         self.assertEqual(native["data_params"]["target_text_representation"], "phones")
+
+    def test_multilingual_fields_in_model_params(self):
+        from styletts2.ev_config import StyleTTS2ModelConfig
+        from styletts2.ev_config.translation import to_native_config
+
+        cfg = self._make_config(
+            model=StyleTTS2ModelConfig(multilingual=True, language_embedding_dim=32)
+        )
+        native = to_native_config(cfg)
+        self.assertTrue(native["model_params"]["multilingual"])
+        self.assertEqual(native["model_params"]["language_embedding_dim"], 32)
 
 
 class TestEVStyleTTS2TextEncoder(unittest.TestCase):

@@ -85,6 +85,8 @@ def to_native_config(config: StyleTTS2Config) -> dict:
         # --- model architecture ---
         "model_params": {
             "multispeaker": m.multispeaker,
+            "multilingual": m.multilingual,
+            "language_embedding_dim": m.language_embedding_dim,
             "dim_in": m.dim_in,
             "hidden_dim": m.hidden_dim,
             "max_conv_dim": m.max_conv_dim,

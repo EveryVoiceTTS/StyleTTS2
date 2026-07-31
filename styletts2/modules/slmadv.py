@@ -39,9 +39,23 @@ class SLMAdversarialLoss:
         use_ind,
         s_trg,
         ref_s=None,
+        langs=None,
     ):
+        # s_trg / ref_s already have the language embedding concatenated in
+        # (by the caller) when the model is multilingual, so most shapes here
+        # follow automatically; only the fresh bert/text_encoder forward
+        # passes below need lang_emb threaded explicitly.
+        lang_emb = self.model._lang_emb(langs)
+        style_dim = self.model.model_params.style_dim
+        half = style_dim + (lang_emb.shape[-1] if lang_emb is not None else 0)
+
         text_mask = length_to_mask(ref_lengths).to(ref_text.device)
         bert_dur = self.model.bert(ref_text, attention_mask=(~text_mask).int())
+        if lang_emb is not None:
+            bert_dur = torch.cat(
+                [bert_dur, lang_emb.unsqueeze(1).expand(-1, bert_dur.size(1), -1)],
+                dim=-1,
+            )
         d_en = self.model.bert_encoder(bert_dur).transpose(-1, -2)
 
         if use_ind and np.random.rand() < 0.5:
@@ -66,8 +80,8 @@ class SLMAdversarialLoss:
                     num_steps=num_steps,
                 ).squeeze(1)
 
-        s_dur = s_preds[:, 128:]
-        # s = s_preds[:, :128] # Unused
+        s_dur = s_preds[:, half:]
+        # s = s_preds[:, :half] # Unused
 
         d, _ = self.model.predictor(
             d_en,
@@ -118,7 +132,9 @@ class SLMAdversarialLoss:
         max_len = max(output_lengths)
 
         with torch.no_grad():
-            t_en = self.model.text_encoder(ref_text, ref_lengths, text_mask)
+            t_en = self.model.text_encoder(
+                ref_text, ref_lengths, text_mask, lang_emb=lang_emb
+            )
 
         s2s_attn = torch.zeros(len(ref_lengths), int(ref_lengths.max()), max_len).to(
             ref_text.device
@@ -176,8 +192,8 @@ class SLMAdversarialLoss:
         en = torch.stack(en)
         p_en = torch.stack(p_en)
 
-        F0_fake, N_fake = self.model.predictor.F0Ntrain(p_en, sp[:, 128:])
-        y_pred = self.model.decoder(en, F0_fake, N_fake, sp[:, :128])
+        F0_fake, N_fake = self.model.predictor.F0Ntrain(p_en, sp[:, half:])
+        y_pred = self.model.decoder(en, F0_fake, N_fake, sp[:, :half])
 
         # discriminator loss
         if (iters + 1) % self.skip_update == 0:

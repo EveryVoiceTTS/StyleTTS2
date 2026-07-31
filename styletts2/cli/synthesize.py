@@ -70,12 +70,16 @@ def synthesize_one(
     embedding_scale: float = 1.0,
     acoustic_blend: float = 0.3,
     prosody_blend: float = 0.7,
+    language: str | None = None,
 ):
     """Synthesize a single utterance and return a float32 numpy waveform.
 
     Works only with stage-2 (or finetune) checkpoints that include the
     diffusion sampler.  Stage-1 checkpoints will raise an AttributeError
     because ``module._sampler`` does not exist.
+
+    ``language`` selects the language embedding for multilingual checkpoints
+    (must be a key of ``module.lang2id``); ignored for monolingual checkpoints.
     """
     import torch
 
@@ -97,6 +101,11 @@ def synthesize_one(
             device
         )
 
+        lang_emb = None
+        if hasattr(module, "language_embedding") and language in module.lang2id:
+            lang_id = torch.LongTensor([module.lang2id[language]])
+            lang_emb = module._lang_emb(lang_id)
+
         return module._synthesize_text(
             tokens,
             input_lengths,
@@ -105,6 +114,7 @@ def synthesize_one(
             embedding_scale=embedding_scale,
             acoustic_blend=acoustic_blend,
             prosody_blend=prosody_blend,
+            lang_emb=lang_emb,
         )
 
 
@@ -167,7 +177,9 @@ def synthesize(
         "und",
         "--language",
         "-l",
-        help="Language tag written into output filenames.",
+        help="Language tag written into output filenames. For multilingual "
+        "checkpoints (must match a language seen during training), this also "
+        "selects the language embedding; ignored for monolingual checkpoints.",
     ),
     diffusion_steps: int = typer.Option(
         5,

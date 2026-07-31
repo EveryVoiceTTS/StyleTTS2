@@ -73,6 +73,7 @@ class TestOODSamplingEVMode(unittest.TestCase):
         ds.text_cleaner = TextCleaner()
         ds.ood_texts = {"und": pool}
         ds._ood_fallback_pool = pool
+        ds.lang2id = None
         ds.data_list = [{"basename": "b0", "speaker": "spk0", "language": "und"}]
         ds.df = pd.DataFrame([{"basename": "b0", "speaker": "spk0"}])
         return ds
@@ -80,8 +81,8 @@ class TestOODSamplingEVMode(unittest.TestCase):
     def _call_getitem(self, ds):
         wave, text, mel = _dummy_tensors()
         with (
-            patch.object(ds, "_load_tensor_ev", return_value=(wave, text, 0)),
-            patch.object(ds, "_load_data_ev", return_value=(mel, 0)),
+            patch.object(ds, "_load_tensor_ev", return_value=(wave, text, 0, 0)),
+            patch.object(ds, "_load_data_ev", return_value=(mel, 0, 0)),
             patch.object(ds, "_preprocess", return_value=mel.unsqueeze(0)),
         ):
             return ds[0]
@@ -101,7 +102,7 @@ class TestOODSamplingEVMode(unittest.TestCase):
         pool = [("hello", [1, 2, 3, 3, 4])] * 20
         ds = self._make_dataset(pool, min_length=20)
         result = self._call_getitem(ds)
-        ref_text_ood = result[3]
+        ref_text_ood = result[4]
         inner = ref_text_ood[1:-1].tolist()  # strip leading/trailing boundary 0
         self.assertGreater(len(inner), 5)
         self.assertIn(_SPACE_IDX, inner)
@@ -139,6 +140,7 @@ class TestOODIndicesFromPSV(unittest.TestCase):
         ds._ood_fallback_pool = [
             item for items in ds.ood_texts.values() for item in items
         ]
+        ds.lang2id = None
         ds.data_list = [{"basename": "b0", "speaker": "spk0", "language": "eng"}]
         ds.df = pd.DataFrame([{"basename": "b0", "speaker": "spk0"}])
         self.ds = ds
@@ -146,20 +148,87 @@ class TestOODIndicesFromPSV(unittest.TestCase):
     def _call_getitem(self):
         wave, text, mel = _dummy_tensors()
         with (
-            patch.object(self.ds, "_load_tensor_ev", return_value=(wave, text, 0)),
-            patch.object(self.ds, "_load_data_ev", return_value=(mel, 0)),
+            patch.object(self.ds, "_load_tensor_ev", return_value=(wave, text, 0, 0)),
+            patch.object(self.ds, "_load_data_ev", return_value=(mel, 0, 0)),
             patch.object(self.ds, "_preprocess", return_value=mel.unsqueeze(0)),
         ):
             return self.ds[0]
 
     def test_ood_indices_are_valid_symbol_table_positions(self):
         result = self._call_getitem()
-        ref_text_ood = result[3]
+        ref_text_ood = result[4]
         inner = ref_text_ood[1:-1].tolist()  # strip boundary tokens
         self.assertGreater(len(inner), 0, "OOD tensor has no inner indices")
         for idx in inner:
             self.assertGreaterEqual(idx, 0)
             self.assertLess(idx, len(self.pretrained_symbols))
+
+
+class TestMultilingualLanguageId(unittest.TestCase):
+    """language_id resolution in FilePathDataset._load_tensor_ev (EV mode)."""
+
+    def _make_dataset(self, lang2id):
+        ds = object.__new__(FilePathDataset)
+        ds.lang2id = lang2id
+        ds.speaker2id = None
+        ds.sr = 24000
+        ds.output_sampling_rate = 24000
+        ds.silence_pad_samples = 0
+        ds._ev_encoder = None
+        ds._token_column = "character_tokens"
+        ds.text_cleaner = TextCleaner()
+        return ds
+
+    def _load(self, ds, item):
+        wave = np.zeros(1000)
+        with (
+            patch("styletts2.dataset.sf.read", return_value=(wave, ds.sr)),
+            patch.object(ds, "_load_file", return_value="dummy.wav"),
+        ):
+            return ds._load_tensor_ev(item)
+
+    def test_resolves_language_id_from_lang2id(self):
+        ds = self._make_dataset({"eng": 0, "crk": 1})
+        item = {
+            "basename": "b0",
+            "speaker": "spk0",
+            "language": "crk",
+            "characters": "hi",
+        }
+        _, _, _, language_id = self._load(ds, item)
+        self.assertEqual(language_id, 1)
+
+    def test_defaults_language_id_to_zero_when_monolingual(self):
+        ds = self._make_dataset(None)
+        item = {
+            "basename": "b0",
+            "speaker": "spk0",
+            "language": "und",
+            "characters": "hi",
+        }
+        _, _, _, language_id = self._load(ds, item)
+        self.assertEqual(language_id, 0)
+
+
+class TestCollaterLangs(unittest.TestCase):
+    """The Collater must batch per-item language_ids into a `langs` tensor."""
+
+    def test_langs_tensor_matches_per_item_language_ids(self):
+        from styletts2.dataset import Collater
+
+        def _item(language_id):
+            mel = torch.zeros(80, 10)
+            text = torch.zeros(3).long()
+            ref_text = torch.zeros(3).long()
+            ref_mel = torch.zeros(80, 10)
+            wave = np.zeros(100)
+            return (0, language_id, mel, text, ref_text, ref_mel, 0, "path", wave)
+
+        batch = [_item(0), _item(1), _item(2)]
+        collate = Collater(max_mel_length=10)
+        result = collate(batch)
+        langs = result[-1]
+        self.assertEqual(sorted(langs.tolist()), [0, 1, 2])
 
 
 if __name__ == "__main__":

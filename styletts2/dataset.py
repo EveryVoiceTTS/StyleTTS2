@@ -49,6 +49,7 @@ class FilePathDataset(torch.utils.data.Dataset):
         preprocessed_dir=None,
         output_sampling_rate=None,
         speaker2id=None,
+        lang2id=None,
         ev_text_config: TextConfig | None = None,
         pretrained_symbols: list[str] | None = None,
         data_augmentation=False,
@@ -66,13 +67,18 @@ class FilePathDataset(torch.utils.data.Dataset):
         self.preprocessed_dir = Path(preprocessed_dir) if preprocessed_dir else None
         self.output_sampling_rate = output_sampling_rate or self.sr
         self.speaker2id = speaker2id  # {speaker_name: int_id} — required in EV mode
+        self.lang2id = lang2id  # {language_code: int_id} — required when multilingual
 
         if self.preprocessed_dir is not None:
             # data_list items are dicts from the EveryVoice PSV filelist loader
             self.data_list = data_list
             self.df = pd.DataFrame(
                 [
-                    {"basename": d["basename"], "speaker": d["speaker"]}
+                    {
+                        "basename": d["basename"],
+                        "speaker": d["speaker"],
+                        "language": d.get("language", "und"),
+                    }
                     for d in data_list
                 ]
             )
@@ -190,9 +196,10 @@ class FilePathDataset(torch.utils.data.Dataset):
         return self.preprocessed_dir / dn / self.sep.join([bn, spk, lang, fn])
 
     def _load_tensor_ev(self, item):
-        """Load wave + text tensor + speaker id from an EveryVoice filelist dict."""
+        """Load wave + text tensor + speaker/language ids from an EveryVoice filelist dict."""
         bn, spk, lang = item["basename"], item["speaker"], item["language"]
         speaker_id = self.speaker2id[spk] if self.speaker2id is not None else 0
+        language_id = self.lang2id[lang] if self.lang2id is not None else 0
 
         wav_path = self._load_file(
             bn, spk, lang, "audio", f"audio-{self.output_sampling_rate}.wav"
@@ -220,10 +227,10 @@ class FilePathDataset(torch.utils.data.Dataset):
         indices.append(0)
         text = torch.LongTensor(indices)
 
-        return wave, text, speaker_id
+        return wave, text, speaker_id, language_id
 
     def _load_data_ev(self, item):
-        wave, text_tensor, speaker_id = self._load_tensor_ev(item)
+        wave, text_tensor, speaker_id, language_id = self._load_tensor_ev(item)
         mel_tensor = self._preprocess(wave).squeeze()
         mel_length = mel_tensor.size(1)
         if mel_length > self.max_mel_length:
@@ -231,7 +238,7 @@ class FilePathDataset(torch.utils.data.Dataset):
             mel_tensor = mel_tensor[
                 :, random_start : random_start + self.max_mel_length
             ]
-        return mel_tensor, speaker_id
+        return mel_tensor, speaker_id, language_id
 
     # ------------------------------------------------------------------
     # Original-mode helpers (unchanged)
@@ -282,15 +289,23 @@ class FilePathDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         data = self.data_list[idx]
         if self.preprocessed_dir is not None:
-            wave, text_tensor, speaker_id = self._load_tensor_ev(data)
-            # Reference sample: another utterance from the same speaker
+            wave, text_tensor, speaker_id, language_id = self._load_tensor_ev(data)
+            # Reference sample: another utterance from the same speaker, and
+            # (when multilingual) the same language — so the style/prosody
+            # reference always matches the language being conditioned on.
             speaker = data["speaker"]
+            lang = data["language"]
             ref_rows = self.df[self.df["speaker"] == speaker]
+            if self.lang2id is not None:
+                lang_matched_rows = ref_rows[ref_rows["language"] == lang]
+                if not lang_matched_rows.empty:
+                    ref_rows = lang_matched_rows
             ref_item = self.data_list[ref_rows.sample(n=1).index[0]]
-            ref_mel_tensor, ref_label = self._load_data_ev(ref_item)
+            ref_mel_tensor, ref_label, _ = self._load_data_ev(ref_item)
             path = data["basename"]
         else:
             wave, text_tensor, speaker_id = self._load_tensor(data)
+            language_id = 0
             ref_data = (
                 (self.df[self.df[2] == str(speaker_id)]).sample(n=1).iloc[0].tolist()
             )
@@ -340,6 +355,7 @@ class FilePathDataset(torch.utils.data.Dataset):
 
         return (
             speaker_id,
+            language_id,
             acoustic_feature,
             text_tensor,
             ref_text_ood,
@@ -362,20 +378,21 @@ class Collater(object):
         self.return_wave = return_wave
 
     def __call__(self, batch):
-        # batch[0] = wave, mel, text, f0, speakerid
+        # batch[0] = speaker_id, language_id, mel, text, ref_text, ref_mel, ref_label, path, wave
         batch_size = len(batch)
 
         # sort by mel length
-        lengths = [b[1].shape[1] for b in batch]
+        lengths = [b[2].shape[1] for b in batch]
         batch_indexes = np.argsort(lengths)[::-1]
         batch = [batch[bid] for bid in batch_indexes]
 
-        nmels = batch[0][1].size(0)
-        max_mel_length = max([b[1].shape[1] for b in batch])
-        max_text_length = max([b[2].shape[0] for b in batch])
-        max_rtext_length = max([b[3].shape[0] for b in batch])
+        nmels = batch[0][2].size(0)
+        max_mel_length = max([b[2].shape[1] for b in batch])
+        max_text_length = max([b[3].shape[0] for b in batch])
+        max_rtext_length = max([b[4].shape[0] for b in batch])
 
         labels = torch.zeros((batch_size)).long()
+        langs = torch.zeros((batch_size)).long()
         mels = torch.zeros((batch_size, nmels, max_mel_length)).float()
         texts = torch.zeros((batch_size, max_text_length)).long()
         ref_texts = torch.zeros((batch_size, max_rtext_length)).long()
@@ -390,6 +407,7 @@ class Collater(object):
 
         for bid, (
             label,
+            language_id,
             mel,
             text,
             ref_text,
@@ -402,6 +420,7 @@ class Collater(object):
             text_size = text.size(0)
             rtext_size = ref_text.size(0)
             labels[bid] = label
+            langs[bid] = language_id
             mels[bid, :, :mel_size] = mel
             texts[bid, :text_size] = text
             ref_texts[bid, :rtext_size] = ref_text
@@ -425,6 +444,7 @@ class Collater(object):
             output_lengths,
             ref_mels,
             paths,
+            langs,
         )
 
 
@@ -435,6 +455,7 @@ def build_dataloader(
     preprocessed_dir=None,
     output_sampling_rate=None,
     speaker2id=None,
+    lang2id=None,
     ev_text_config=None,
     pretrained_symbols=None,
     validation=False,
@@ -456,6 +477,7 @@ def build_dataloader(
         preprocessed_dir=preprocessed_dir,
         output_sampling_rate=output_sampling_rate,
         speaker2id=speaker2id,
+        lang2id=lang2id,
         ev_text_config=ev_text_config,
         pretrained_symbols=pretrained_symbols,
         OOD_data=OOD_data,

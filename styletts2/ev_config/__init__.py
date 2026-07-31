@@ -327,6 +327,19 @@ class StyleTTS2ModelConfig(ConfigModel):
         default=False,
         description="Enable multi-speaker conditioning.",
     )
+    multilingual: bool = Field(
+        default=False,
+        description=(
+            "Enable multi-language conditioning via a learned language embedding, "
+            "concatenated into the text encoder, prosodic BERT path, style encoders, "
+            "and diffusion conditioning. Requires a 'language' column in your filelists. "
+            "See https://aclanthology.org/2026.eacl-short.16/ for the method this is based on."
+        ),
+    )
+    language_embedding_dim: int = Field(
+        default=64,
+        description="Dimensionality of the per-language embedding when multilingual=True.",
+    )
     target_text_representation_level: TargetTrainingTextRepresentationLevel = Field(
         default=TargetTrainingTextRepresentationLevel.characters,
         description=(

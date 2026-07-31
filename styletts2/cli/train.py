@@ -72,6 +72,17 @@ def train(
 
     config = to_native_config(ev_config)
 
+    if ev_config.model.multilingual:
+        from everyvoice.text.lookups import lookuptables_from_config
+
+        lang2id, _ = lookuptables_from_config(ev_config)
+        if not lang2id:
+            sys.exit(
+                "ERROR: model.multilingual is true but no 'language' values were "
+                "found in your training/validation filelists."
+            )
+        config["lang2id"] = lang2id
+
     tr = ev_config.training
     max_epochs = (
         tr.epochs_1st

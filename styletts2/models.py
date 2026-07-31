@@ -352,18 +352,33 @@ class LayerNorm(nn.Module):
 
 
 class TextEncoder(nn.Module):
-    def __init__(self, channels, kernel_size, depth, n_symbols, actv=nn.LeakyReLU(0.2)):
+    def __init__(
+        self,
+        channels,
+        kernel_size,
+        depth,
+        n_symbols,
+        actv=nn.LeakyReLU(0.2),
+        lang_emb_dim=0,
+    ):
         super().__init__()
         self.embedding = nn.Embedding(n_symbols, channels)
+        self.lang_emb_dim = lang_emb_dim
 
         padding = (kernel_size - 1) // 2
         self.cnn = nn.ModuleList()
-        for _ in range(depth):
+        for i in range(depth):
+            # The language embedding (if any) is concatenated onto the phoneme
+            # embedding once, before the first conv layer only.
+            in_channels = channels + lang_emb_dim if i == 0 else channels
             self.cnn.append(
                 nn.Sequential(
                     weight_norm(
                         nn.Conv1d(
-                            channels, channels, kernel_size=kernel_size, padding=padding
+                            in_channels,
+                            channels,
+                            kernel_size=kernel_size,
+                            padding=padding,
                         )
                     ),
                     LayerNorm(channels),
@@ -377,9 +392,13 @@ class TextEncoder(nn.Module):
             channels, channels // 2, 1, batch_first=True, bidirectional=True
         )
 
-    def forward(self, x, input_lengths, m):
+    def forward(self, x, input_lengths, m, lang_emb=None):
         x = self.embedding(x)  # [B, T, emb]
         x = x.transpose(1, 2)  # [B, emb, T]
+        if lang_emb is not None:
+            x = torch.cat(
+                [x, lang_emb.unsqueeze(-1).expand(-1, -1, x.shape[-1])], dim=1
+            )
         m = m.to(input_lengths.device).unsqueeze(1)
         x.masked_fill_(m, 0.0)
 
@@ -766,15 +785,26 @@ def load_ASR_model(config: dict):
     return model.train()
 
 
-def build_model(args, text_aligner, pitch_extractor, bert):
+def build_model(args, text_aligner, pitch_extractor, bert, lang2id=None):
     assert args.decoder.type in ["istftnet", "hifigan"], "Decoder type unknown"
+
+    # Language embedding: a learned per-language vector concatenated into the
+    # text encoder, prosodic BERT path, style encoders, and diffusion
+    # conditioning (see https://aclanthology.org/2026.eacl-short.16/). Only
+    # active when both the config flag and a non-empty language lookup table
+    # are provided; otherwise the model is architecturally identical to the
+    # monolingual case (lang_emb_dim=0).
+    multilingual = bool(getattr(args, "multilingual", False)) and bool(lang2id)
+    lang_emb_dim = args.language_embedding_dim if multilingual else 0
+    style_dim = args.style_dim + lang_emb_dim
+    bert_hidden_size = bert.config.hidden_size + lang_emb_dim
 
     if args.decoder.type == "istftnet":
         from .modules.istftnet import Decoder
 
         decoder = Decoder(
             dim_in=args.hidden_dim,
-            style_dim=args.style_dim,
+            style_dim=style_dim,
             dim_out=args.n_mels,
             resblock_kernel_sizes=args.decoder.resblock_kernel_sizes,
             upsample_rates=args.decoder.upsample_rates,
@@ -789,7 +819,7 @@ def build_model(args, text_aligner, pitch_extractor, bert):
 
         decoder = Decoder(
             dim_in=args.hidden_dim,
-            style_dim=args.style_dim,
+            style_dim=style_dim,
             dim_out=args.n_mels,
             resblock_kernel_sizes=args.decoder.resblock_kernel_sizes,
             upsample_rates=args.decoder.upsample_rates,
@@ -803,10 +833,11 @@ def build_model(args, text_aligner, pitch_extractor, bert):
         kernel_size=5,
         depth=args.n_layer,
         n_symbols=args.n_token,
+        lang_emb_dim=lang_emb_dim,
     )
 
     predictor = ProsodyPredictor(
-        style_dim=args.style_dim,
+        style_dim=style_dim,
         d_hid=args.hidden_dim,
         nlayers=args.n_layer,
         max_dur=args.max_dur,
@@ -823,25 +854,25 @@ def build_model(args, text_aligner, pitch_extractor, bert):
     # define diffusion model
     if args.multispeaker:
         transformer = StyleTransformer1d(
-            channels=args.style_dim * 2,
-            context_embedding_features=bert.config.hidden_size,
-            context_features=args.style_dim * 2,
+            channels=style_dim * 2,
+            context_embedding_features=bert_hidden_size,
+            context_features=style_dim * 2,
             **args.diffusion.transformer,
         )
     else:
         transformer = Transformer1d(
-            channels=args.style_dim * 2,
-            context_embedding_features=bert.config.hidden_size,
+            channels=style_dim * 2,
+            context_embedding_features=bert_hidden_size,
             **args.diffusion.transformer,
         )
 
     diffusion = AudioDiffusionConditional(
         in_channels=1,
         embedding_max_length=bert.config.max_position_embeddings,
-        embedding_features=bert.config.hidden_size,
+        embedding_features=bert_hidden_size,
         embedding_mask_proba=args.diffusion.embedding_mask_proba,  # Conditional dropout of batch elements,
-        channels=args.style_dim * 2,
-        context_features=args.style_dim * 2,
+        channels=style_dim * 2,
+        context_features=style_dim * 2,
     )
 
     diffusion.diffusion = KDiffusion(
@@ -857,7 +888,7 @@ def build_model(args, text_aligner, pitch_extractor, bert):
 
     nets = Munch(
         bert=bert,
-        bert_encoder=nn.Linear(bert.config.hidden_size, args.hidden_dim),
+        bert_encoder=nn.Linear(bert_hidden_size, args.hidden_dim),
         predictor=predictor,
         decoder=decoder,
         text_encoder=text_encoder,
@@ -873,6 +904,11 @@ def build_model(args, text_aligner, pitch_extractor, bert):
             args.slm.hidden, args.slm.nlayers, args.slm.initial_channel
         ),
     )
+
+    if multilingual:
+        nets.language_embedding = nn.Embedding(
+            len(lang2id), args.language_embedding_dim
+        )
 
     return nets
 

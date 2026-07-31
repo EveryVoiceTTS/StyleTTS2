@@ -169,6 +169,7 @@ class StyleTTS2DataModule(L.LightningDataModule):
             output_sampling_rate=self._output_sampling_rate,
             ev_text_config=self._ev_text_config,
             pretrained_symbols=self._pretrained_symbols,
+            lang2id=self.config.get("lang2id"),
             OOD_min_length=dp["OOD_min_length"],
             batch_size=self.config.get("batch_size", 16),
             num_workers=2,
@@ -191,6 +192,7 @@ class StyleTTS2DataModule(L.LightningDataModule):
             output_sampling_rate=self._output_sampling_rate,
             ev_text_config=self._ev_text_config,
             pretrained_symbols=self._pretrained_symbols,
+            lang2id=self.config.get("lang2id"),
             OOD_min_length=dp["OOD_min_length"],
             batch_size=self.config.get("batch_size", 16),
             validation=True,
@@ -238,6 +240,7 @@ class StyleTTS2Module(L.LightningModule):
         model_params = recursive_munch(config["model_params"])
         self.model_params = model_params
         self.multispeaker = model_params.multispeaker
+        self.lang2id: dict = config.get("lang2id") or {}
         loss_params = Munch(config["loss_params"])
         self.loss_params = loss_params
 
@@ -258,7 +261,9 @@ class StyleTTS2Module(L.LightningModule):
             pitch_extractor = build_F0_model_shape()
             plbert = build_plbert_shape(config["pretrained_plbert"])
         # TODO: model_params passes an incorrect value for n_symbols in the text embedding
-        nets = build_model(model_params, text_aligner, pitch_extractor, plbert)
+        nets = build_model(
+            model_params, text_aligner, pitch_extractor, plbert, lang2id=self.lang2id
+        )
         # Register every sub-network as a direct attribute so Lightning / DDP
         # tracks parameters and state correctly.
         for key, module in nets.items():
@@ -292,6 +297,15 @@ class StyleTTS2Module(L.LightningModule):
 
         # Running std used for diffusion sigma estimation
         self._running_std: list[float] = []
+
+    def _lang_emb(self, langs: "torch.Tensor | None") -> "torch.Tensor | None":
+        """Look up the per-utterance language embedding, or None if monolingual.
+
+        `langs` is a LongTensor of language ids (one per batch element).
+        """
+        if not hasattr(self, "language_embedding") or langs is None:
+            return None
+        return self.language_embedding(langs.to(self.device))
 
     def setup(self, stage=None):
         if stage == "predict":
@@ -590,9 +604,12 @@ class StyleTTS2Module(L.LightningModule):
                     en = (
                         b["asr"][bib, :, : mel_length // 2].unsqueeze(0).to(self.device)
                     )
+                    lang_emb_bib = self._lang_emb(b["langs"][bib : bib + 1])
 
                     F0_real, _, _ = self.pitch_extractor(gt.unsqueeze(1))
                     s = self.style_encoder(gt.unsqueeze(1))
+                    if lang_emb_bib is not None:
+                        s = torch.cat([s, lang_emb_bib], dim=-1)
                     real_norm = log_norm(gt.unsqueeze(1)).squeeze(1)
                     y_rec = self.decoder(en, F0_real, real_norm, s)
 
@@ -621,9 +638,12 @@ class StyleTTS2Module(L.LightningModule):
                             .unsqueeze(0)
                             .to(self.device)
                         )
+                        lang_emb_bib = self._lang_emb(b["langs"][bib : bib + 1])
 
                         F0_real, _, _ = self.pitch_extractor(gt.unsqueeze(1))
                         s = self.style_encoder(gt.unsqueeze(1))
+                        if lang_emb_bib is not None:
+                            s = torch.cat([s, lang_emb_bib], dim=-1)
                         real_norm = log_norm(gt.unsqueeze(1)).squeeze(1)
                         y_rec = self.decoder(en, F0_real, real_norm, s)
 
@@ -636,6 +656,8 @@ class StyleTTS2Module(L.LightningModule):
                         )
 
                         s_dur = self.predictor_encoder(gt.unsqueeze(1))
+                        if lang_emb_bib is not None:
+                            s_dur = torch.cat([s_dur, lang_emb_bib], dim=-1)
                         p_en = (
                             b["p"][bib, :, : mel_length // 2]
                             .unsqueeze(0)
@@ -664,18 +686,32 @@ class StyleTTS2Module(L.LightningModule):
                     text_mask = b["text_mask"].to(self.device)
                     bert_dur = b["bert_dur"].to(self.device)
                     d_en = b["d_en"].to(self.device)
+                    lang_emb_full = self._lang_emb(b["langs"].to(self.device))
+                    style_dim = self.model_params.style_dim
+                    half = style_dim + (
+                        lang_emb_full.shape[-1] if lang_emb_full is not None else 0
+                    )
 
                     ref_s = None
                     if self.multispeaker and b["ref_mels"] is not None:
                         ref_mels = b["ref_mels"].to(self.device)
                         style_enc = self.style_encoder(ref_mels.unsqueeze(1))
                         predictor_enc = self.predictor_encoder(ref_mels.unsqueeze(1))
+                        if lang_emb_full is not None:
+                            style_enc = torch.cat([style_enc, lang_emb_full], dim=-1)
+                            predictor_enc = torch.cat(
+                                [predictor_enc, lang_emb_full], dim=-1
+                            )
                         ref_s = torch.cat([style_enc, predictor_enc], dim=1)
 
-                    t_en = self.text_encoder(texts, input_lengths, text_mask)
+                    t_en = self.text_encoder(
+                        texts, input_lengths, text_mask, lang_emb=lang_emb_full
+                    )
 
                     for bib in range(min(d_en.size(0), self._MAX_VAL_AUDIO)):
-                        noise = torch.randn((1, 256), device=self.device).unsqueeze(1)
+                        noise = torch.randn(
+                            (1, half * 2), device=self.device
+                        ).unsqueeze(1)
                         sampler_kwargs = dict(
                             noise=noise,
                             embedding=bert_dur[bib].unsqueeze(0),
@@ -686,8 +722,8 @@ class StyleTTS2Module(L.LightningModule):
                             sampler_kwargs["features"] = ref_s[bib].unsqueeze(0)
                         s_pred = self._sampler(**sampler_kwargs).squeeze(1)
 
-                        s = s_pred[:, 128:]
-                        ref = s_pred[:, :128]
+                        s = s_pred[:, half:]
+                        ref = s_pred[:, :half]
 
                         il = input_lengths[bib].unsqueeze(0)
                         tm = text_mask[bib, : input_lengths[bib]].unsqueeze(0)
@@ -807,8 +843,9 @@ class StyleTTS2Module(L.LightningModule):
         device = self.device
         waves = batch[0]
         texts, input_lengths, _, _, mels, mel_input_length, _ = [
-            b.to(device) for b in batch[1:-1]
+            b.to(device) for b in batch[1:-2]
         ]
+        lang_emb = self._lang_emb(batch[-1])
 
         with torch.no_grad():
             mask = length_to_mask(mel_input_length // (2**self.n_down)).to(device)
@@ -840,7 +877,7 @@ class StyleTTS2Module(L.LightningModule):
             )
             s2s_attn_mono = maximum_path(s2s_attn, mask_ST)
 
-        t_en = self.text_encoder(texts, input_lengths, text_mask)
+        t_en = self.text_encoder(texts, input_lengths, text_mask, lang_emb=lang_emb)
         asr = t_en @ (s2s_attn if random.getrandbits(1) else s2s_attn_mono)
 
         mel_len = min(int(mel_input_length.min().item() / 2 - 1), self.max_len // 2)
@@ -860,6 +897,8 @@ class StyleTTS2Module(L.LightningModule):
         s = self.style_encoder(
             st.unsqueeze(1) if self.multispeaker else gt.unsqueeze(1)
         )
+        if lang_emb is not None:
+            s = torch.cat([s, lang_emb], dim=-1)
         y_rec = self.decoder(en, F0_real, real_norm, s)
 
         # -- Discriminator update -----------------------------------------
@@ -951,7 +990,9 @@ class StyleTTS2Module(L.LightningModule):
             mels,
             mel_input_length,
             ref_mels,
-        ) = [b.to(device) for b in batch[1:-1]]
+        ) = [b.to(device) for b in batch[1:-2]]
+        langs = batch[-1]
+        lang_emb = self._lang_emb(langs)
 
         # -- Frozen inference pass ---------------------------------------
         with torch.no_grad():
@@ -968,7 +1009,7 @@ class StyleTTS2Module(L.LightningModule):
             )
             s2s_attn_mono = maximum_path(s2s_attn, mask_ST)
 
-            t_en = self.text_encoder(texts, input_lengths, text_mask)
+            t_en = self.text_encoder(texts, input_lengths, text_mask, lang_emb=lang_emb)
             if is_ft:
                 asr = t_en @ (s2s_attn if random.getrandbits(1) else s2s_attn_mono)
             else:
@@ -979,6 +1020,9 @@ class StyleTTS2Module(L.LightningModule):
             if self.multispeaker:
                 style_enc = self.style_encoder(ref_mels.unsqueeze(1))
                 predictor_enc = self.predictor_encoder(ref_mels.unsqueeze(1))
+                if lang_emb is not None:
+                    style_enc = torch.cat([style_enc, lang_emb], dim=-1)
+                    predictor_enc = torch.cat([predictor_enc, lang_emb], dim=-1)
                 ref = torch.cat([style_enc, predictor_enc], dim=1)
 
         # Per-utterance style (adaptive avgpool prevents batching)
@@ -989,9 +1033,17 @@ class StyleTTS2Module(L.LightningModule):
             gs.append(self.style_encoder(mel.unsqueeze(0).unsqueeze(1)))
         s_dur = torch.stack(ss).squeeze(1)
         gs = torch.stack(gs).squeeze(1)
+        if lang_emb is not None:
+            s_dur = torch.cat([s_dur, lang_emb], dim=-1)
+            gs = torch.cat([gs, lang_emb], dim=-1)
         s_trg = torch.cat([gs, s_dur], dim=-1).detach()
 
         bert_dur = self.bert(texts, attention_mask=(~text_mask).int())
+        if lang_emb is not None:
+            bert_dur = torch.cat(
+                [bert_dur, lang_emb.unsqueeze(1).expand(-1, bert_dur.size(1), -1)],
+                dim=-1,
+            )
         d_en = self.bert_encoder(bert_dur).transpose(-1, -2)
 
         # -- Diffusion training ------------------------------------------
@@ -1064,6 +1116,9 @@ class StyleTTS2Module(L.LightningModule):
         s = self.style_encoder(
             st.unsqueeze(1) if self.multispeaker else gt.unsqueeze(1)
         )
+        if lang_emb is not None:
+            s_dur_clip = torch.cat([s_dur_clip, lang_emb], dim=-1)
+            s = torch.cat([s, lang_emb], dim=-1)
 
         with torch.no_grad():
             F0_real, _, F0 = self.pitch_extractor(gt.unsqueeze(1))
@@ -1168,6 +1223,7 @@ class StyleTTS2Module(L.LightningModule):
                 use_ind,
                 s_trg.detach(),
                 ref if self.multispeaker else None,
+                langs=langs if hasattr(self, "language_embedding") else None,
             )
             if slm_out is not None:
                 d_loss_slm, loss_gen_lm, _ = slm_out
@@ -1275,24 +1331,44 @@ class StyleTTS2Module(L.LightningModule):
         acoustic_blend: float = 0.3,
         prosody_blend: float = 0.7,
         ref_s: "torch.Tensor | None" = None,
+        lang_emb: "torch.Tensor | None" = None,
     ):
         """Run a single text→waveform forward pass.
 
         All tensors must already be on ``self.device``.
         Exactly one of ``ref_mel`` or ``ref_s`` must be supplied.
+        ``lang_emb`` (shape ``[1, language_embedding_dim]``), when the loaded
+        checkpoint is multilingual, conditions the text encoder, prosodic
+        BERT path, and both halves of the style vector.
         Returns a float32 numpy waveform (shape ``[T]``).
         """
         if ref_s is None:
             assert ref_mel is not None, "Either ref_mel or ref_s must be provided"
             ref_s = self._encode_reference(ref_mel)
 
+        style_dim = self.model_params.style_dim
+        if lang_emb is not None:
+            # ref_s is [acoustic_style | prosodic_style]; concatenate the
+            # language embedding onto each half individually, mirroring how
+            # it's threaded through the style encoders during training.
+            ref_s = torch.cat(
+                [ref_s[:, :style_dim], lang_emb, ref_s[:, style_dim:], lang_emb],
+                dim=-1,
+            )
+        half = style_dim + (lang_emb.shape[-1] if lang_emb is not None else 0)
+
         text_mask = length_to_mask(input_lengths).to(self.device)
 
         bert_dur = self.bert(tokens, attention_mask=(~text_mask).int())
+        if lang_emb is not None:
+            bert_dur = torch.cat(
+                [bert_dur, lang_emb.unsqueeze(1).expand(-1, bert_dur.size(1), -1)],
+                dim=-1,
+            )
         d_en = self.bert_encoder(bert_dur).transpose(-1, -2)
-        t_en = self.text_encoder(tokens, input_lengths, text_mask)
+        t_en = self.text_encoder(tokens, input_lengths, text_mask, lang_emb=lang_emb)
 
-        noise = torch.randn((1, 256), device=self.device).unsqueeze(1)
+        noise = torch.randn_like(ref_s).unsqueeze(1)
         s_pred = self._sampler(
             noise=noise,
             embedding=bert_dur,
@@ -1301,8 +1377,8 @@ class StyleTTS2Module(L.LightningModule):
             features=ref_s,
         ).squeeze(1)
 
-        ref = acoustic_blend * s_pred[:, :128] + (1 - acoustic_blend) * ref_s[:, :128]
-        s = prosody_blend * s_pred[:, 128:] + (1 - prosody_blend) * ref_s[:, 128:]
+        ref = acoustic_blend * s_pred[:, :half] + (1 - acoustic_blend) * ref_s[:, :half]
+        s = prosody_blend * s_pred[:, half:] + (1 - prosody_blend) * ref_s[:, half:]
 
         T = int(input_lengths[0].item())
         tm = text_mask[0, :T].unsqueeze(0)
@@ -1363,6 +1439,14 @@ class StyleTTS2Module(L.LightningModule):
             batch["reference_path"], self.sr, self._mel_transform
         ).to(device)
 
+        lang_emb = None
+        if (
+            hasattr(self, "language_embedding")
+            and batch.get("language") in self.lang2id
+        ):
+            lang_id = torch.LongTensor([self.lang2id[batch["language"]]])
+            lang_emb = self._lang_emb(lang_id)
+
         wav = self._synthesize_text(
             tokens,
             input_lengths,
@@ -1371,6 +1455,7 @@ class StyleTTS2Module(L.LightningModule):
             embedding_scale=batch.get("embedding_scale", 1.0),
             acoustic_blend=batch.get("acoustic_blend", 0.3),
             prosody_blend=batch.get("prosody_blend", 0.7),
+            lang_emb=lang_emb,
         )
 
         return {
@@ -1397,9 +1482,10 @@ class StyleTTS2Module(L.LightningModule):
         device = self.device
         waves = batch[0]
         texts, input_lengths, _, _, mels, mel_input_length, _ = [
-            b.to(device) for b in batch[1:-1]
+            b.to(device) for b in batch[1:-2]
         ]
-        paths = batch[-1]
+        paths = batch[-2]
+        lang_emb = self._lang_emb(batch[-1])
 
         mask = length_to_mask(mel_input_length // (2**self.n_down)).to(device)
         text_mask = length_to_mask(input_lengths).to(device)
@@ -1419,7 +1505,7 @@ class StyleTTS2Module(L.LightningModule):
         )
         s2s_attn.masked_fill_(attn_mask < 1, 0.0)
 
-        t_en = self.text_encoder(texts, input_lengths, text_mask)
+        t_en = self.text_encoder(texts, input_lengths, text_mask, lang_emb=lang_emb)
         asr = t_en @ s2s_attn
 
         mel_len = min(int(mel_input_length.min().item() / 2 - 1), self.max_len // 2)
@@ -1428,6 +1514,8 @@ class StyleTTS2Module(L.LightningModule):
 
         F0_real, _, _ = self.pitch_extractor(gt.unsqueeze(1))
         s = self.style_encoder(gt.unsqueeze(1))
+        if lang_emb is not None:
+            s = torch.cat([s, lang_emb], dim=-1)
         real_norm = log_norm(gt.unsqueeze(1)).squeeze(1)
         y_rec = self.decoder(en, F0_real, real_norm, s)
         loss_mel = self.stft_loss(y_rec.squeeze(), wav)
@@ -1450,6 +1538,7 @@ class StyleTTS2Module(L.LightningModule):
                 waves=waves,
                 texts=texts.detach().cpu(),
                 input_lengths=input_lengths.detach().cpu(),
+                langs=batch[-1].detach().cpu(),
                 basenames=[Path(p).stem for p in paths],
             )
             if self._val_batch is None:
@@ -1464,6 +1553,7 @@ class StyleTTS2Module(L.LightningModule):
                     "mel_input_length",
                     "texts",
                     "input_lengths",
+                    "langs",
                 ):
                     self._val_batch[key] = _pad_and_cat(
                         self._val_batch[key], new[key][:n_take]
@@ -1479,9 +1569,11 @@ class StyleTTS2Module(L.LightningModule):
         device = self.device
         waves = batch[0]
         texts, input_lengths, _, _, mels, mel_input_length, ref_mels = [
-            b.to(device) for b in batch[1:-1]
+            b.to(device) for b in batch[1:-2]
         ]
-        paths = batch[-1]
+        paths = batch[-2]
+        langs = batch[-1]
+        lang_emb = self._lang_emb(langs)
 
         mask = length_to_mask(mel_input_length // (2**self.n_down)).to(device)
         text_mask = length_to_mask(input_lengths).to(device)
@@ -1493,7 +1585,7 @@ class StyleTTS2Module(L.LightningModule):
         )
         s2s_attn_mono = maximum_path(s2s_attn, mask_ST)
 
-        t_en = self.text_encoder(texts, input_lengths, text_mask)
+        t_en = self.text_encoder(texts, input_lengths, text_mask, lang_emb=lang_emb)
         asr = t_en @ s2s_attn_mono
         d_gt = s2s_attn_mono.sum(axis=-1).detach()
 
@@ -1503,8 +1595,15 @@ class StyleTTS2Module(L.LightningModule):
             ss.append(self.predictor_encoder(mel.unsqueeze(0).unsqueeze(1)))
             gs.append(self.style_encoder(mel.unsqueeze(0).unsqueeze(1)))
         s_dur = torch.stack(ss).squeeze(1)
+        if lang_emb is not None:
+            s_dur = torch.cat([s_dur, lang_emb], dim=-1)
 
         bert_dur = self.bert(texts, attention_mask=(~text_mask).int())
+        if lang_emb is not None:
+            bert_dur = torch.cat(
+                [bert_dur, lang_emb.unsqueeze(1).expand(-1, bert_dur.size(1), -1)],
+                dim=-1,
+            )
         d_en = self.bert_encoder(bert_dur).transpose(-1, -2)
         d, p = self.predictor(d_en, s_dur, input_lengths, s2s_attn_mono, text_mask)
 
@@ -1513,6 +1612,8 @@ class StyleTTS2Module(L.LightningModule):
         en, gt, wav, p_en = clips
 
         s = self.predictor_encoder(gt.unsqueeze(1))
+        if lang_emb is not None:
+            s = torch.cat([s, lang_emb], dim=-1)
         F0_fake, N_fake = self.predictor.F0Ntrain(p_en, s)
 
         loss_dur = torch.tensor(0.0, device=device)
@@ -1529,6 +1630,8 @@ class StyleTTS2Module(L.LightningModule):
         loss_dur = loss_dur / texts.size(0)
 
         s = self.style_encoder(gt.unsqueeze(1))
+        if lang_emb is not None:
+            s = torch.cat([s, lang_emb], dim=-1)
         y_rec = self.decoder(en, F0_fake, N_fake, s)
         loss_mel = self.stft_loss(y_rec.squeeze(), wav)
         F0_real, _, _ = self.pitch_extractor(gt.unsqueeze(1))
@@ -1559,6 +1662,7 @@ class StyleTTS2Module(L.LightningModule):
                 input_lengths=input_lengths.detach().cpu(),
                 text_mask=text_mask.detach().cpu(),
                 ref_mels=ref_mels.detach().cpu() if self.multispeaker else None,
+                langs=langs.detach().cpu(),
                 basenames=[Path(p).stem for p in paths],
             )
             if self._val_batch is None:
@@ -1576,6 +1680,7 @@ class StyleTTS2Module(L.LightningModule):
                     "texts",
                     "input_lengths",
                     "text_mask",
+                    "langs",
                 ):
                     self._val_batch[key] = _pad_and_cat(
                         self._val_batch[key], new[key][:n_take]
