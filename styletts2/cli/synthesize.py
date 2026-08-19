@@ -6,11 +6,13 @@ and the `everyvoice demo text-to-wav` Gradio app.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import typer
 from everyvoice import logger
 from everyvoice.base_cli import command, default_typer_args
+from everyvoice.base_cli.interfaces import typer_file_option
 from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.type_definitions import (
     SynthesizeOutputFormats,
 )
@@ -138,29 +140,55 @@ def synthesize(
         file_okay=True,
         dir_okay=False,
     ),
-    reference: Path = typer.Option(
-        ...,
+    reference: Path | None = typer_file_option(
+        None,
         "--reference",
         "-r",
-        help="Reference audio file used to extract speaker style.",
-        exists=True,
+        help="Reference audio file used to extract speaker style. Required"
+        " unless every row of --filelist provides its own 'reference' or"
+        " 'reference_path' column.",
     ),
     text: list[str] = typer.Option(
-        ...,
+        [],
         "--text",
         "-t",
-        help="Text string(s) to synthesize. Repeat the flag for multiple utterances.",
+        help="Text string(s) to synthesize. Repeat the flag for multiple utterances."
+        " Use --filelist instead if you want to synthesize a lot of sentences or"
+        " have different speaker/language/reference per sentence.",
+    ),
+    filelist: Path | None = typer_file_option(
+        None,
+        "--filelist",
+        "-f",
+        help="The path to a file containing a list of utterances (a.k.a filelist)."
+        " Expected columns: 'basename', 'characters' (or 'phones'), 'speaker',"
+        " 'language', and optionally 'reference' (or 'reference_path'). Any column"
+        " that is absent falls back to the corresponding --speaker/--language/"
+        "--reference CLI option. Use --text if you want to just synthesize one sample.",
     ),
     output_dir: Path = typer.Option(
         Path("synthesis_output"),
         "--output-dir",
         "-o",
-        help="Directory where synthesized files will be written.",
+        help="Directory where synthesized files will be written."
+        " By default, filenames include the basename, speaker, language, and"
+        " other metadata, e.g. 'LJ050-0269--LJ--eng--ckpt=100000--pred.wav'."
+        " Use --simple-filenames to write just 'LJ050-0269.wav' instead.",
     ),
     output_type: list[SynthesizeOutputFormats] = typer.Option(
         [SynthesizeOutputFormats.wav],
         "--output-type",
         help="Output format(s) to produce.",
+    ),
+    simple_filenames: bool = typer.Option(
+        False,
+        "--simple-filenames",
+        help="Write output filenames as just the basename and extension"
+        " (e.g. 'LJ050-0269.wav') instead of the default, which also includes"
+        " the speaker, language, and other metadata"
+        " (e.g. 'LJ050-0269--LJ--eng--ckpt=100000--pred.wav')."
+        " Only use this if your basenames are unique across speakers and"
+        " languages, otherwise outputs can overwrite each other.",
     ),
     accelerator: str = typer.Option(
         "auto",
@@ -209,16 +237,36 @@ def synthesize(
     **everyvoice synthesize text-to-wav logs_and_checkpoints/.../stage-2-last.ckpt \\
         --reference path/to/reference.wav \\
         --text "Hello world" --text "How are you?"**
+
+    Or, for batch synthesis from a filelist:
+
+    **everyvoice synthesize text-to-wav logs_and_checkpoints/.../stage-2-last.ckpt \\
+        --reference path/to/reference.wav --filelist my_filelist.psv**
     """
+    # Do argument error checking before doing expensive imports
+    if text and filelist:
+        print(
+            "Got arguments for both --text and --filelist - this will only process the text."
+            " Please re-run without providing --text if you want to run batch synthesis on the provided filelist.",
+            file=sys.stderr,
+        )
+    if not text and not filelist:
+        print("You must define either --text or --filelist", file=sys.stderr)
+        sys.exit(1)
+    if text and reference is None:
+        print(
+            "Missing --reference option, which is required when using --text.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     import lightning as L
     import torch
-    from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.utils import (
-        truncate_basename,
-    )
-    from everyvoice.utils import slugify
 
     from .utils_heavy import (
         StyleTTS2SynthesisDataModule,
+        build_filelist_entries,
+        build_text_entries,
         get_styletts2_synthesis_output_callbacks,
     )
 
@@ -238,23 +286,41 @@ def synthesize(
     state = torch.load(model_path, map_location="cpu", weights_only=True)
     global_step = int(state.get("global_step", 0))
 
-    entries = [
-        {
-            "raw_text": t,
-            "basename": truncate_basename(slugify(t)),
-            "speaker": speaker,
-            "language": language,
-            "reference_path": str(reference),
-            "diffusion_steps": diffusion_steps,
-            "embedding_scale": embedding_scale,
-            "acoustic_blend": acoustic_blend,
-            "prosody_blend": prosody_blend,
-        }
-        for t in text
-    ]
+    try:
+        if text:
+            entries = build_text_entries(
+                text,
+                str(reference),
+                speaker,
+                language,
+                diffusion_steps,
+                embedding_scale,
+                acoustic_blend,
+                prosody_blend,
+            )
+        else:
+            assert filelist is not None
+            filelist_loader = module.config["ev_config"].training.filelist_loader
+            entries = build_filelist_entries(
+                filelist_loader(filelist),
+                str(reference) if reference else None,
+                speaker,
+                language,
+                diffusion_steps,
+                embedding_scale,
+                acoustic_blend,
+                prosody_blend,
+            )
+    except ValueError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
     callbacks = get_styletts2_synthesis_output_callbacks(
-        output_type, output_dir, global_step, module.sr
+        output_type,
+        output_dir,
+        global_step,
+        module.sr,
+        simple_filenames=simple_filenames,
     )
     if not callbacks:
         logger.warning("No output format requested; nothing to do.")
