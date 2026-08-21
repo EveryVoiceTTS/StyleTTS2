@@ -1,0 +1,16 @@
+[run]
+branch = true
+source_pkgs =
+    styletts2
+    everyvoice.model.e2e.StyleTTS2_lightning.styletts2
+omit =
+    *tmp*
+    */tests/*
+    */__main__.py
+
+[report]
+precision = 2
+exclude_lines =
+    pragma: no cover
+    if 0:
+    if __name__ == .__main__.:
