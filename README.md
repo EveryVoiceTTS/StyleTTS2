@@ -1,5 +1,8 @@
 # EveryVoice TTS fork of StyleTTS2
 
+[![license](https://img.shields.io/badge/Licence-MIT-green)](LICENSE)
+![beta](https://img.shields.io/badge/beta-grey)
+
 This version has been forked from https://github.com/yl4579/StyleTTS2 by the EveryVoice Team at the National Research Council of Canada to integrate it within the EveryVoice TTS. This was done to make it faster and easier to use, particularly (but not only) for under-resourced languages. You can still use this repo by itself, but it's recommended to use it as part of the [EveryVoice TTS Toolkit](https://everyvoice.ca)
 
 Some of the key changes are as follows:
