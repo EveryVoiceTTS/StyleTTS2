@@ -184,9 +184,7 @@ def synthesize(
         False,
         "--simple-filenames",
         help="Write output filenames as just the basename and extension"
-        " (e.g. 'LJ050-0269.wav') instead of the default, which also includes"
-        " the speaker, language, and other metadata"
-        " (e.g. 'LJ050-0269--LJ--eng--ckpt=100000--pred.wav')."
+        " (e.g. 'LJ050-0269.wav') instead of the default."
         " Only use this if your basenames are unique across speakers and"
         " languages, otherwise outputs can overwrite each other.",
     ),
@@ -232,7 +230,7 @@ def synthesize(
 ):
     """Synthesize audio from text using a trained StyleTTS2 model.
 
-    Example:
+    Examples:
 
     **everyvoice synthesize text-to-wav logs_and_checkpoints/.../stage-2-last.ckpt \\
         --reference path/to/reference.wav \\
@@ -241,15 +239,16 @@ def synthesize(
     Or, for batch synthesis from a filelist:
 
     **everyvoice synthesize text-to-wav logs_and_checkpoints/.../stage-2-last.ckpt \\
-        --reference path/to/reference.wav --filelist my_filelist.psv**
+        --reference path/to/reference.wav --filelist my_filelist.psv --simple-filenames**
     """
     # Do argument error checking before doing expensive imports
     if text and filelist:
         print(
-            "Got arguments for both --text and --filelist - this will only process the text."
-            " Please re-run without providing --text if you want to run batch synthesis on the provided filelist.",
+            "Got arguments for both --text and --filelist."
+            " You can only synthesize using one of these options",
             file=sys.stderr,
         )
+        sys.exit(1)
     if not text and not filelist:
         print("You must define either --text or --filelist", file=sys.stderr)
         sys.exit(1)
