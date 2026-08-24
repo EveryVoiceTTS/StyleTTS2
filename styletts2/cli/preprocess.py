@@ -1,5 +1,6 @@
 from enum import Enum
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from everyvoice.base_cli.interfaces import preprocess_base_command_interface
@@ -13,12 +14,14 @@ class PreprocessCategories(str, Enum):
 
 @merge_args(preprocess_base_command_interface)
 def preprocess(
-    steps: list[PreprocessCategories] = typer.Option(
-        [cat.value for cat in PreprocessCategories],
-        "-s",
-        "--steps",
-        help="Which preprocessing steps to run. If none are provided, text and audio processing steps are performed.",
-    ),
+    steps: Annotated[
+        list[PreprocessCategories],
+        typer.Option(
+            "-s",
+            "--steps",
+            help="Which preprocessing steps to run. If none are provided, text and audio processing steps are performed.",
+        ),
+    ] = list(PreprocessCategories),
     **kwargs,
 ):
     """Preprocess audio and text data for StyleTTS2 training."""
