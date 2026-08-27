@@ -16,7 +16,7 @@ command(
     short_help="Preprocess your data",
     help=f"""Preprocess your data for StyleTTS2 training. For example:
 
-    **everyvoice preprocess e2e config/{TEXT_TO_WAV_CONFIG_FILENAME_PREFIX}.yaml**
+    **everyvoice preprocess text-to-wav config/{TEXT_TO_WAV_CONFIG_FILENAME_PREFIX}.yaml**
     """,
 )(app_preprocess)
 
@@ -26,6 +26,6 @@ command(
     short_help="Train your StyleTTS2 model",
     help=f"""Train a StyleTTS2 end-to-end model. For example:
 
-    **everyvoice train e2e config/{TEXT_TO_WAV_CONFIG_FILENAME_PREFIX}.yaml --mode first**
+    **everyvoice train text-to-wav config/{TEXT_TO_WAV_CONFIG_FILENAME_PREFIX}.yaml --mode first**
     """,
 )(app_train)
