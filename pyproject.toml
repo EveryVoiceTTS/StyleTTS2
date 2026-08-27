@@ -39,53 +39,12 @@ classifiers = [
   "Typing :: Typed",
 ]
 requires-python = ">=3.10, <3.13"
-dependencies = [
-    "torch>=2.0",
-    "torchaudio>=2.0",
-    "transformers>=4.30",
-    "lightning>=2.0",
-    "librosa>=0.9",
-    "soundfile",
-    "pydub",
-    "pyyaml",
-    "munch",
-    "einops>=0.5",
-    "einops-exts",
-    "tqdm",
-    "matplotlib",
-    "scipy",
-    "numpy",
-    "pandas",
-    "typer>=0.9",
-    "typing-extensions",
-    "monotonic-align",
-    # temporary: used by scripts/train_first.py until Lightning migration
-    "accelerate",
-    "tensorboard>=2.20.0",
-    "torchcodec>=0.9.1",
-    "everyvoice>=0.4.0",
-]
+dependencies = ["everyvoice==0.5.0"]
 
 [project.optional-dependencies]
 dev = [
-  "black~=24.3",
-  "coverage",
-  "chardet<6", # requests<=2.32.5 not compat with chardet>=6, remove this on next requests release
-  "diff-cover",
-  "flake8>=4.0.1",
-  "gitlint-core>=0.19.0",
-  "isort>=5.10.1",
-  "mypy>=1.8.0",
-  "pre-commit>=3.2.0",
-  "types-pyyaml>=6.0.5",
-  "types-requests>=2.27.11",
-  "types-setuptools>=57.4.9",
-  "types-tabulate==0.9.0",
-  "types-tqdm>=4.66",
-  "styletts2[test]",
-]
-test = [
-    "pytest"
+  "everyvoice[dev]",
+  "everyvoice[test]",
 ]
 [project.scripts]
 styletts2 = "styletts2.cli:app"
@@ -93,10 +52,6 @@ styletts2 = "styletts2.cli:app"
 # ---------------------------------------------------------------------------
 # uv configuration
 # ---------------------------------------------------------------------------
-
-[tool.uv.sources]
-# monotonic_align has no PyPI release; install from source
-monotonic-align = { git = "https://github.com/resemble-ai/monotonic_align.git" }
 
 [tool.isort]
 known_first_party = "styletts2"
