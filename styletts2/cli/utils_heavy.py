@@ -77,7 +77,7 @@ def build_text_entries(
     prosody_blend: float,
     text_representation: DatasetTextRepresentation = DatasetTextRepresentation.characters,
     split_text: bool = False,
-    split_params: "tuple[int, int, str, str]" = (100, 200, "", ""),
+    split_params: tuple[int, int, str, str] = (100, 200, "", ""),
 ) -> list[dict]:
     """Build one synthesis entry per `--text` string, all sharing the same
     reference/speaker/language. When `split_text` is set, long strings are
@@ -116,7 +116,7 @@ def build_filelist_entries(
     acoustic_blend: float,
     prosody_blend: float,
     split_text: bool = False,
-    split_params: "tuple[int, int, str, str]" = (100, 200, "", ""),
+    split_params: tuple[int, int, str, str] = (100, 200, "", ""),
 ) -> list[dict]:
     """Build one synthesis entry per filelist row (or per chunk of it, when
     `split_text` is set).

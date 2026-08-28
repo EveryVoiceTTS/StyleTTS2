@@ -40,7 +40,7 @@ def _load_reference_mel(path, target_sr, mel_transform):
 def encode_text_for_inference(
     module,
     raw_text: str,
-    language: "str | None",
+    language: str | None,
     text_representation=None,
 ):
     """Normalize, optionally G2P, and tokenize raw text exactly like training-time

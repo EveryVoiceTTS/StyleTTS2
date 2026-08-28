@@ -74,7 +74,7 @@ def synthesize_one(
     acoustic_blend: float = 0.3,
     prosody_blend: float = 0.7,
     language: str | None = None,
-    text_representation: "DatasetTextRepresentation | None" = None,
+    text_representation: DatasetTextRepresentation | None = None,
 ):
     """Synthesize a single utterance and return a float32 numpy waveform.
 

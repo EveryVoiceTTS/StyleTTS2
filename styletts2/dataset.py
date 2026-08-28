@@ -56,8 +56,8 @@ class FilePathDataset(torch.utils.data.Dataset):
         validation=False,
         OOD_data="data/OOD_texts.txt",
         OOD_min_length=50,
-        ood_data_paths: "dict[str, Any] | None" = None,
-        ood_val_list: "list[dict] | None" = None,
+        ood_data_paths: dict[str, Any] | None = None,
+        ood_val_list: list[dict] | None = None,
     ):
         pp = config["preprocess_params"]
         self.sr = pp.get("sr", 24000)
@@ -141,8 +141,8 @@ class FilePathDataset(torch.utils.data.Dataset):
 
     def _load_ood_ev(
         self,
-        ood_data_paths: "dict[str, Any] | None",
-        ood_val_list: "list[dict] | None",
+        ood_data_paths: dict[str, Any] | None,
+        ood_val_list: list[dict] | None,
     ) -> None:
         """Populate self.ood_texts from per-language PSV paths or a val-fallback list."""
         from everyvoice.utils import generic_psv_filelist_reader

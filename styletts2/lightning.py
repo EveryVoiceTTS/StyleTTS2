@@ -298,7 +298,7 @@ class StyleTTS2Module(L.LightningModule):
         # Running std used for diffusion sigma estimation
         self._running_std: list[float] = []
 
-    def _lang_emb(self, langs: "torch.Tensor | None") -> "torch.Tensor | None":
+    def _lang_emb(self, langs: torch.Tensor | None) -> torch.Tensor | None:
         """Look up the per-utterance language embedding, or None if monolingual.
 
         `langs` is a LongTensor of language ids (one per batch element).
@@ -1310,7 +1310,7 @@ class StyleTTS2Module(L.LightningModule):
     # ------------------------------------------------------------------
 
     @torch.no_grad()
-    def _encode_reference(self, ref_mel: "torch.Tensor") -> "torch.Tensor":
+    def _encode_reference(self, ref_mel: torch.Tensor) -> torch.Tensor:
         """Compute a combined style+predictor encoding from a normalised mel.
 
         ``ref_mel`` should be shape ``[1, n_mels, T]`` and already on
@@ -1323,15 +1323,15 @@ class StyleTTS2Module(L.LightningModule):
     @torch.no_grad()
     def _synthesize_text(
         self,
-        tokens: "torch.Tensor",
-        input_lengths: "torch.Tensor",
-        ref_mel: "torch.Tensor | None" = None,
+        tokens: torch.Tensor,
+        input_lengths: torch.Tensor,
+        ref_mel: torch.Tensor | None = None,
         diffusion_steps: int = 5,
         embedding_scale: float = 1.0,
         acoustic_blend: float = 0.3,
         prosody_blend: float = 0.7,
-        ref_s: "torch.Tensor | None" = None,
-        lang_emb: "torch.Tensor | None" = None,
+        ref_s: torch.Tensor | None = None,
+        lang_emb: torch.Tensor | None = None,
     ):
         """Run a single text→waveform forward pass.
 
