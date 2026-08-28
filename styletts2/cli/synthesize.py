@@ -208,13 +208,16 @@ def synthesize(
         "-s",
         help="Speaker label written into output filenames.",
     ),
-    language: str = typer.Option(
-        "und",
+    language: str | None = typer.Option(
+        None,
         "--language",
         "-l",
-        help="Language tag written into output filenames. For multilingual "
-        "checkpoints (must match a language seen during training), this also "
-        "selects the language embedding; ignored for monolingual checkpoints.",
+        help="Language tag written into output filenames, and used to select "
+        "a g2p engine/normalization rules for text processing. For "
+        "multilingual checkpoints (must match a language seen during "
+        "training), this also selects the language embedding. Defaults to "
+        "the checkpoint's own (single) training language for monolingual "
+        "checkpoints.",
     ),
     diffusion_steps: int = typer.Option(
         5,
@@ -291,6 +294,8 @@ def synthesize(
     logger.info(f"Loading StyleTTS2 model from {model_path}")
     module, mel_transform = load_styletts2_model(model_path, device)
     module._mel_transform = mel_transform
+
+    language = language or next(iter(module.lang2id.keys()), None)
 
     state = torch.load(model_path, map_location="cpu", weights_only=True)
     global_step = int(state.get("global_step", 0))

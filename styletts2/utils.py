@@ -122,6 +122,8 @@ def encode_text_for_inference(
             "'characters' or 'phones'."
         )
 
+    if language is None:
+        language = next(iter(getattr(module, "lang2id", None) or {}), None)
     item: dict = {"language": language or "und"}
     if text_representation == DatasetTextRepresentation.characters:
         item["characters"] = raw_text
@@ -133,6 +135,10 @@ def encode_text_for_inference(
         text_processor=module._text_processor,
         use_pfs=False,
         encode_as_string=True,
+    )
+    logger.info(
+        "StyleTTS2 inference text processing (pre-selection): "
+        f"item={item!r} characters={characters!r} phones={phones!r}"
     )
     if target_level == TargetTrainingTextRepresentationLevel.ipa_phones:
         token_string = phones
