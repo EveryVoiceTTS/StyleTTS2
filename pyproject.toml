@@ -58,6 +58,10 @@ override-dependencies = [
   "pydub-ng>=0.2.0",
 ]
 
+[tool.uv.sources]
+# For development purposes, everyvoice itself is required in editable mode
+everyvoice = { path = "../../../../", editable = true }
+
 [tool.hatch.version]
 path = "styletts2/_version.py"
 
