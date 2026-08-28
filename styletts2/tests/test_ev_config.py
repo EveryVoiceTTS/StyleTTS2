@@ -1,28 +1,26 @@
 """Tests for the EveryVoice ↔ StyleTTS2 config/text integration."""
 
-import unittest
-
 import pytest
 from everyvoice.tests.stubs import capture_logs
 from pydantic import ValidationError
 
 
-class TestStyleTTS2PretrainedConfig(unittest.TestCase):
+class TestStyleTTS2PretrainedConfig:
     def test_default_pretrained_symbols_length(self):
         from styletts2.ev_config import StyleTTS2PretrainedConfig
 
         cfg = StyleTTS2PretrainedConfig()
-        self.assertEqual(len(cfg.pretrained_symbols), 178)
+        assert len(cfg.pretrained_symbols) == 178
 
     def test_default_pretrained_symbols_first_three(self):
         from styletts2.ev_config import StyleTTS2PretrainedConfig
         from styletts2.text_utils import symbols
 
         cfg = StyleTTS2PretrainedConfig()
-        self.assertEqual(cfg.pretrained_symbols[:3], list(symbols)[:3])
+        assert cfg.pretrained_symbols[:3] == list(symbols)[:3]
 
 
-class TestStyleTTS2ModelConfig(unittest.TestCase):
+class TestStyleTTS2ModelConfig:
     def test_default_target_text_representation_level(self):
         from everyvoice.config.type_definitions import (
             TargetTrainingTextRepresentationLevel,
@@ -31,23 +29,23 @@ class TestStyleTTS2ModelConfig(unittest.TestCase):
         from styletts2.ev_config import StyleTTS2ModelConfig
 
         cfg = StyleTTS2ModelConfig()
-        self.assertEqual(
-            cfg.target_text_representation_level,
-            TargetTrainingTextRepresentationLevel.characters,
+        assert (
+            cfg.target_text_representation_level
+            == TargetTrainingTextRepresentationLevel.characters
         )
 
     def test_default_multilingual_fields(self):
         from styletts2.ev_config import StyleTTS2ModelConfig
 
         cfg = StyleTTS2ModelConfig()
-        self.assertFalse(cfg.multilingual)
-        self.assertEqual(cfg.language_embedding_dim, 64)
+        assert not cfg.multilingual
+        assert cfg.language_embedding_dim == 64
 
 
 _CONTACT = {"contact": {"contact_name": "Test", "contact_email": "test@test.com"}}
 
 
-class TestToNativeConfig(unittest.TestCase):
+class TestToNativeConfig:
     def _make_config(self, **model_kwargs):
         from everyvoice.config.text_config import TextConfig
 
@@ -61,9 +59,7 @@ class TestToNativeConfig(unittest.TestCase):
 
         cfg = self._make_config()
         native = to_native_config(cfg)
-        self.assertEqual(
-            native["data_params"]["target_text_representation"], "characters"
-        )
+        assert native["data_params"]["target_text_representation"] == "characters"
 
     def test_target_text_representation_in_data_params_phones(self):
         from everyvoice.config.type_definitions import (
@@ -80,7 +76,7 @@ class TestToNativeConfig(unittest.TestCase):
         )
         native = to_native_config(cfg)
         # TargetTrainingTextRepresentationLevel.ipa_phones.value == "phones"
-        self.assertEqual(native["data_params"]["target_text_representation"], "phones")
+        assert native["data_params"]["target_text_representation"] == "phones"
 
     def test_multilingual_fields_in_model_params(self):
         from styletts2.ev_config import StyleTTS2ModelConfig
@@ -90,12 +86,13 @@ class TestToNativeConfig(unittest.TestCase):
             model=StyleTTS2ModelConfig(multilingual=True, language_embedding_dim=32)
         )
         native = to_native_config(cfg)
-        self.assertTrue(native["model_params"]["multilingual"])
-        self.assertEqual(native["model_params"]["language_embedding_dim"], 32)
+        assert native["model_params"]["multilingual"]
+        assert native["model_params"]["language_embedding_dim"] == 32
 
 
-class TestEVStyleTTS2TextEncoder(unittest.TestCase):
-    def setUp(self):
+class TestEVStyleTTS2TextEncoder:
+    @pytest.fixture(autouse=True)
+    def _clear_warn_once(self):
         # _WARN_ONCE is module-level state; clear it so warning tests are independent.
         import styletts2.ev_config.text as _text_mod
 
@@ -115,20 +112,20 @@ class TestEVStyleTTS2TextEncoder(unittest.TestCase):
         # "h/e/l/l/o" — these are all in the pretrained Latin+IPA set
         # Use simple latin chars that are definitely in the pretrained set
         indices = encoder.encode_token_sequence("h/e/l/l/o")
-        self.assertEqual(len(indices), 5)
+        assert len(indices) == 5
         # Each index should be a valid position in the symbol table
         for idx in indices:
-            self.assertGreaterEqual(idx, 0)
-            self.assertLess(idx, len(symbols))
+            assert idx >= 0
+            assert idx < len(symbols)
 
     def test_encode_ipa_phone_tokens(self):
         encoder, symbols = self._make_encoder()
         # IPA phones that are in StyleTTS2's _letters_ipa set
         indices = encoder.encode_token_sequence("h/ɛ/l/o/ʊ")
-        self.assertEqual(len(indices), 5)
+        assert len(indices) == 5
         for idx in indices:
-            self.assertGreaterEqual(idx, 0)
-            self.assertLess(idx, len(symbols))
+            assert idx >= 0
+            assert idx < len(symbols)
 
     def test_punctuation_remapping_tokens(self):
         from everyvoice.text.features import DEFAULT_PUNCTUATION_HASH
@@ -140,9 +137,9 @@ class TestEVStyleTTS2TextEncoder(unittest.TestCase):
         }
         for k, v in tokens.items():
             indices = encoder.encode_token_sequence(k)
-            self.assertEqual(len(indices), 1)
+            assert len(indices) == 1
             # "!" and "," should be in the pretrained symbol table
-            self.assertEqual(symbols[indices[0]], v)
+            assert symbols[indices[0]] == v
 
     def test_paren_dropped_with_warning(self):
         from everyvoice.text.features import DEFAULT_PUNCTUATION_HASH
@@ -152,20 +149,20 @@ class TestEVStyleTTS2TextEncoder(unittest.TestCase):
         # <PAREN> has no StyleTTS2 equivalent — should be silently dropped
         with capture_logs() as warnings:
             indices = encoder.encode_token_sequence(paren_token)
-        self.assertEqual(indices, [])
-        self.assertTrue(any("no mapping" in msg for msg in warnings))
+        assert indices == []
+        assert any("no mapping" in msg for msg in warnings)
 
     def test_unknown_token_dropped_with_warning(self):
         encoder, _ = self._make_encoder()
         with capture_logs() as warnings:
             indices = encoder.encode_token_sequence("<UNKNOWN_TOKEN_XYZ>")
-        self.assertEqual(indices, [])
-        self.assertTrue(any("no mapping" in msg for msg in warnings))
+        assert indices == []
+        assert any("no mapping" in msg for msg in warnings)
 
     def test_empty_token_sequence(self):
         encoder, _ = self._make_encoder()
         indices = encoder.encode_token_sequence("")
-        self.assertEqual(indices, [])
+        assert indices == []
 
     def test_mixed_valid_and_dropped_tokens(self):
         from everyvoice.text.features import DEFAULT_PUNCTUATION_HASH
@@ -175,12 +172,12 @@ class TestEVStyleTTS2TextEncoder(unittest.TestCase):
         # "h / <PAREN> / e" — PAREN should be dropped, h and e kept
         with capture_logs():
             indices = encoder.encode_token_sequence(f"h/{paren_token}/e")
-        self.assertEqual(len(indices), 2)
-        self.assertEqual(symbols[indices[0]], "h")
-        self.assertEqual(symbols[indices[1]], "e")
+        assert len(indices) == 2
+        assert symbols[indices[0]] == "h"
+        assert symbols[indices[1]] == "e"
 
 
-class TestSymbolSubsetValidator(unittest.TestCase):
+class TestSymbolSubsetValidator:
     def _text_config_with_extra_symbols(self, *extra: str):
         """Return a TextConfig with *extra* symbols added as a custom symbol set."""
         from everyvoice.config.text_config import Symbols, TextConfig
@@ -248,7 +245,7 @@ class TestSymbolSubsetValidator(unittest.TestCase):
         StyleTTS2Config(text=TextConfig(), **_CONTACT)
 
 
-class TestEncodeTextForInference(unittest.TestCase):
+class TestEncodeTextForInference:
     """Tests for styletts2.utils.encode_text_for_inference, which replaced the
     old flat TextCleaner lookup at inference time with the same
     normalize/to_replace/G2P pipeline used at training time."""
@@ -289,7 +286,7 @@ class TestEncodeTextForInference(unittest.TestCase):
 
         module = self._make_module(TargetTrainingTextRepresentationLevel.characters)
         tokens = encode_text_for_inference(module, "hello", "eng")
-        self.assertGreater(tokens.numel(), 0)
+        assert tokens.numel() > 0
 
     def test_characters_trained_model_rejects_phones_input(self):
         from everyvoice.config.type_definitions import (
@@ -300,7 +297,7 @@ class TestEncodeTextForInference(unittest.TestCase):
         from styletts2.utils import encode_text_for_inference
 
         module = self._make_module(TargetTrainingTextRepresentationLevel.characters)
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             encode_text_for_inference(
                 module, "h ɛ l oʊ", "eng", DatasetTextRepresentation.ipa_phones
             )
@@ -317,7 +314,7 @@ class TestEncodeTextForInference(unittest.TestCase):
 
         module = self._make_module(TargetTrainingTextRepresentationLevel.ipa_phones)
         tokens = encode_text_for_inference(module, "hello", "eng")
-        self.assertGreater(tokens.numel(), 0)
+        assert tokens.numel() > 0
 
     def test_phonological_features_not_implemented(self):
         from everyvoice.config.type_definitions import (
@@ -329,7 +326,7 @@ class TestEncodeTextForInference(unittest.TestCase):
         module = self._make_module(
             TargetTrainingTextRepresentationLevel.phonological_features
         )
-        with self.assertRaises(NotImplementedError):
+        with pytest.raises(NotImplementedError):
             encode_text_for_inference(module, "hello", "eng")
 
     def test_missing_ev_config_raises(self):
@@ -340,7 +337,7 @@ class TestEncodeTextForInference(unittest.TestCase):
 
         module = _FakeModule()
         module.config = {}
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             encode_text_for_inference(module, "hello", "eng")
 
     def test_to_replace_applied(self):
@@ -366,4 +363,4 @@ class TestEncodeTextForInference(unittest.TestCase):
         without_replace = encode_text_for_inference(
             module_plain, "cats and dogs", "eng"
         )
-        self.assertEqual(with_replace.tolist(), without_replace.tolist())
+        assert with_replace.tolist() == without_replace.tolist()
