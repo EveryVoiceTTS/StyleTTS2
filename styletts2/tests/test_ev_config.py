@@ -246,3 +246,124 @@ class TestSymbolSubsetValidator(unittest.TestCase):
         from styletts2.ev_config import StyleTTS2Config
 
         StyleTTS2Config(text=TextConfig(), **_CONTACT)
+
+
+class TestEncodeTextForInference(unittest.TestCase):
+    """Tests for styletts2.utils.encode_text_for_inference, which replaced the
+    old flat TextCleaner lookup at inference time with the same
+    normalize/to_replace/G2P pipeline used at training time."""
+
+    def _make_module(self, target_text_representation_level, **text_kwargs):
+        import string
+
+        from everyvoice.config.text_config import Symbols, TextConfig
+
+        from styletts2.ev_config import StyleTTS2Config, StyleTTS2ModelConfig
+
+        # Declare ascii letters and the specific single-character IPA phones
+        # 'eng' g2p produces for "hello" (h ʌ l o ʊ) -- all present in
+        # StyleTTS2's pretrained symbol table. Plain (non dataset-suffixed)
+        # keys like these are included for every representation level.
+        symbols = Symbols(ascii=list(string.ascii_lowercase), ipa=["ʌ", "ʊ"])
+        config = StyleTTS2Config(
+            text=TextConfig(symbols=symbols, **text_kwargs),
+            model=StyleTTS2ModelConfig(
+                target_text_representation_level=target_text_representation_level
+            ),
+            **_CONTACT,
+        )
+
+        class _FakeModule:
+            pass
+
+        module = _FakeModule()
+        module.config = {"ev_config": config}
+        return module
+
+    def test_characters_trained_model_encodes_characters(self):
+        from everyvoice.config.type_definitions import (
+            TargetTrainingTextRepresentationLevel,
+        )
+
+        from styletts2.utils import encode_text_for_inference
+
+        module = self._make_module(TargetTrainingTextRepresentationLevel.characters)
+        tokens = encode_text_for_inference(module, "hello", "eng")
+        self.assertGreater(tokens.numel(), 0)
+
+    def test_characters_trained_model_rejects_phones_input(self):
+        from everyvoice.config.type_definitions import (
+            DatasetTextRepresentation,
+            TargetTrainingTextRepresentationLevel,
+        )
+
+        from styletts2.utils import encode_text_for_inference
+
+        module = self._make_module(TargetTrainingTextRepresentationLevel.characters)
+        with self.assertRaises(ValueError):
+            encode_text_for_inference(
+                module, "h ɛ l oʊ", "eng", DatasetTextRepresentation.ipa_phones
+            )
+
+    def test_phones_trained_model_auto_phonemizes_characters(self):
+        """A phones-trained model should still accept raw characters input by
+        default, auto-phonemizing via g2p -- mirroring FastSpeech2's inference
+        behaviour -- rather than requiring pre-phonemized text."""
+        from everyvoice.config.type_definitions import (
+            TargetTrainingTextRepresentationLevel,
+        )
+
+        from styletts2.utils import encode_text_for_inference
+
+        module = self._make_module(TargetTrainingTextRepresentationLevel.ipa_phones)
+        tokens = encode_text_for_inference(module, "hello", "eng")
+        self.assertGreater(tokens.numel(), 0)
+
+    def test_phonological_features_not_implemented(self):
+        from everyvoice.config.type_definitions import (
+            TargetTrainingTextRepresentationLevel,
+        )
+
+        from styletts2.utils import encode_text_for_inference
+
+        module = self._make_module(
+            TargetTrainingTextRepresentationLevel.phonological_features
+        )
+        with self.assertRaises(NotImplementedError):
+            encode_text_for_inference(module, "hello", "eng")
+
+    def test_missing_ev_config_raises(self):
+        from styletts2.utils import encode_text_for_inference
+
+        class _FakeModule:
+            pass
+
+        module = _FakeModule()
+        module.config = {}
+        with self.assertRaises(ValueError):
+            encode_text_for_inference(module, "hello", "eng")
+
+    def test_to_replace_applied(self):
+        """A to_replace rule should be applied before tokenization, so text
+        containing the match encodes identically to text already containing
+        the replacement."""
+        from everyvoice.config.type_definitions import (
+            TargetTrainingTextRepresentationLevel,
+        )
+
+        from styletts2.utils import encode_text_for_inference
+
+        module_with_replace = self._make_module(
+            TargetTrainingTextRepresentationLevel.characters,
+            to_replace={"&": "and"},
+        )
+        module_plain = self._make_module(
+            TargetTrainingTextRepresentationLevel.characters
+        )
+        with_replace = encode_text_for_inference(
+            module_with_replace, "cats & dogs", "eng"
+        )
+        without_replace = encode_text_for_inference(
+            module_plain, "cats and dogs", "eng"
+        )
+        self.assertEqual(with_replace.tolist(), without_replace.tolist())

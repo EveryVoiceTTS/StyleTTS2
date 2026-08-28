@@ -13,6 +13,7 @@ import typer
 from everyvoice import logger
 from everyvoice.base_cli import command, default_typer_args
 from everyvoice.base_cli.interfaces import typer_file_option
+from everyvoice.config.type_definitions import DatasetTextRepresentation
 from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.type_definitions import (
     SynthesizeOutputFormats,
 )
@@ -73,6 +74,7 @@ def synthesize_one(
     acoustic_blend: float = 0.3,
     prosody_blend: float = 0.7,
     language: str | None = None,
+    text_representation: "DatasetTextRepresentation | None" = None,
 ):
     """Synthesize a single utterance and return a float32 numpy waveform.
 
@@ -82,21 +84,20 @@ def synthesize_one(
 
     ``language`` selects the language embedding for multilingual checkpoints
     (must be a key of ``module.lang2id``); ignored for monolingual checkpoints.
+    ``text_representation`` indicates whether ``text`` is raw characters (the
+    default) or already-phonemized IPA; see ``encode_text_for_inference``.
     """
     import torch
 
-    from ..text_utils import (
-        TextCleaner,
-    )
     from ..utils import (
         _load_reference_mel,
+        encode_text_for_inference,
     )
 
     with torch.no_grad():
-        text_cleaner = TextCleaner()
-        tokens = torch.LongTensor(text_cleaner(text)).unsqueeze(0).to(device)
-        if tokens.numel() == 0:
-            raise ValueError(f"Text produced no tokens: {text!r}")
+        tokens = encode_text_for_inference(
+            module, text, language, text_representation
+        ).to(device)
 
         input_lengths = torch.LongTensor([tokens.size(1)]).to(device)
         ref_mel = _load_reference_mel(reference_path, module.sr, mel_transform).to(
@@ -155,6 +156,14 @@ def synthesize(
         help="Text string(s) to synthesize. Repeat the flag for multiple utterances."
         " Use --filelist instead if you want to synthesize a lot of sentences or"
         " have different speaker/language/reference per sentence.",
+    ),
+    text_representation: DatasetTextRepresentation = typer.Option(
+        DatasetTextRepresentation.characters,
+        "--text-representation",
+        help="The representation of the text passed via --text: 'characters' or"
+        " 'phones' (already-phonemized IPA). The input type must be compatible"
+        " with your model. Only applies to --text; --filelist rows determine"
+        " this automatically from their 'characters'/'phones' column.",
     ),
     filelist: Path | None = typer_file_option(
         None,
@@ -267,6 +276,7 @@ def synthesize(
         build_filelist_entries,
         build_text_entries,
         get_styletts2_synthesis_output_callbacks,
+        get_styletts2_text_split_params,
     )
 
     device = torch.device(
@@ -285,6 +295,10 @@ def synthesize(
     state = torch.load(model_path, map_location="cpu", weights_only=True)
     global_step = int(state.get("global_step", 0))
 
+    split_text, split_params = get_styletts2_text_split_params(
+        module, language, text_representation
+    )
+
     try:
         if text:
             entries = build_text_entries(
@@ -296,6 +310,9 @@ def synthesize(
                 embedding_scale,
                 acoustic_blend,
                 prosody_blend,
+                text_representation=text_representation,
+                split_text=split_text,
+                split_params=split_params,
             )
         else:
             assert filelist is not None
@@ -309,6 +326,8 @@ def synthesize(
                 embedding_scale,
                 acoustic_blend,
                 prosody_blend,
+                split_text=split_text,
+                split_params=split_params,
             )
     except ValueError as e:
         logger.error(str(e))

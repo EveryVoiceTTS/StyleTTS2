@@ -36,6 +36,128 @@ def _load_reference_mel(path, target_sr, mel_transform):
     return (torch.log(1e-5 + mel.unsqueeze(0)) - MEL_MEAN) / MEL_STD
 
 
+def encode_text_for_inference(
+    module,
+    raw_text: str,
+    language: "str | None",
+    text_representation=None,
+):
+    """Normalize, optionally G2P, and tokenize raw text exactly like training-time
+    preprocessing does, then translate the result into StyleTTS2 embedding indices.
+
+    This mirrors what FastSpeech2's inference dataset does via
+    ``Preprocessor.process_text`` (normalization + ``to_replace`` + G2P, driven by
+    the model's own ``TextConfig``).
+
+    Args:
+        module: a ``StyleTTS2Module`` with an EveryVoice ``config["ev_config"]``.
+        raw_text: the text to synthesize, as typed/passed by the caller.
+        language: the language tag for the utterance (used to select a g2p engine
+            and to look up ``to_replace``/cleaner rules); pass ``None`` for "und".
+        text_representation: whether ``raw_text`` is already-phonemized IPA
+            (``DatasetTextRepresentation.ipa_phones``) or raw ``characters``
+            (the default). Only meaningful when the model wasn't trained on
+            characters -- see the compatibility check below.
+
+    Returns:
+        A ``[1, T]`` LongTensor on CPU; move it to the target device before use.
+
+    Raises:
+        ValueError: if the checkpoint has no attached EveryVoice config, if
+            ``text_representation`` is incompatible with the model's trained
+            representation, or if the text produces no tokens.
+        NotImplementedError: if the model was trained on phonological features,
+            which StyleTTS2 inference does not support.
+    """
+    from everyvoice.config.type_definitions import (
+        DatasetTextRepresentation,
+        TargetTrainingTextRepresentationLevel,
+    )
+    from everyvoice.preprocessor.preprocessor import Preprocessor
+    from everyvoice.text.text_processor import TextProcessor
+
+    from .ev_config.text import EVStyleTTS2TextEncoder
+
+    if text_representation is None:
+        text_representation = DatasetTextRepresentation.characters
+
+    if not isinstance(module.config, dict) or "ev_config" not in module.config:
+        raise ValueError(
+            "This checkpoint has no EveryVoice configuration attached "
+            "('ev_config'), so text cannot be normalized/phonemized for "
+            "inference. This feature requires a model trained via "
+            "'everyvoice train text-to-wav'."
+        )
+    ev_config = module.config["ev_config"]
+    target_level = ev_config.model.target_text_representation_level
+
+    if target_level == TargetTrainingTextRepresentationLevel.phonological_features:
+        raise NotImplementedError(
+            "StyleTTS2 inference does not support phonological_features-trained "
+            "checkpoints; only 'characters' and 'phones' are supported."
+        )
+
+    if (
+        target_level == TargetTrainingTextRepresentationLevel.characters
+        and text_representation != DatasetTextRepresentation.characters
+    ):
+        raise ValueError(
+            f"Your model was trained on {target_level.value} but you provided "
+            f"{text_representation.value} which is incompatible."
+        )
+
+    if not hasattr(module, "_text_processor"):
+        module._text_processor = TextProcessor(
+            ev_config.text, target_text_representation_level=target_level
+        )
+    if not hasattr(module, "_ev_encoder"):
+        module._ev_encoder = EVStyleTTS2TextEncoder(
+            ev_config.text, ev_config.pretrained.pretrained_symbols
+        )
+
+    if text_representation == DatasetTextRepresentation.arpabet:
+        raise NotImplementedError(
+            "StyleTTS2 inference does not yet support arpabet input; use "
+            "'characters' or 'phones'."
+        )
+
+    item: dict = {"language": language or "und"}
+    if text_representation == DatasetTextRepresentation.characters:
+        item["characters"] = raw_text
+    else:
+        item["phones"] = raw_text
+
+    characters, phones, _pfs = Preprocessor.process_text(
+        item,
+        text_processor=module._text_processor,
+        use_pfs=False,
+        encode_as_string=True,
+    )
+    if target_level == TargetTrainingTextRepresentationLevel.ipa_phones:
+        token_string = phones
+    else:
+        token_string = characters
+
+    if not token_string:
+        if (
+            target_level == TargetTrainingTextRepresentationLevel.ipa_phones
+            and text_representation == DatasetTextRepresentation.characters
+        ):
+            raise ValueError(
+                f"Your model was trained on phones, but no g2p engine is "
+                f"available for language '{item['language']}' to convert your "
+                "characters input. Provide already-phonemized text with "
+                "text_representation=phones instead."
+            )
+        raise ValueError(f"Text produced no tokens: {raw_text!r}")
+
+    indices = module._ev_encoder.encode_token_sequence(token_string)
+    if not indices:
+        raise ValueError(f"Text produced no tokens: {raw_text!r}")
+
+    return torch.LongTensor(indices).unsqueeze(0)
+
+
 def maximum_path(neg_cent, mask):
     """Cython optimized version.
     neg_cent: [b, t_t, t_s]

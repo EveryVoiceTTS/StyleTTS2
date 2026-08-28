@@ -1415,17 +1415,23 @@ class StyleTTS2Module(L.LightningModule):
         Expects ``batch`` to be a dict with keys: ``raw_text``, ``basename``,
         ``speaker``, ``language``, ``reference_path``, and optional synthesis
         control params (``diffusion_steps``, ``embedding_scale``,
-        ``acoustic_blend``, ``prosody_blend``).
+        ``acoustic_blend``, ``prosody_blend``, ``text_representation``,
+        ``is_last_input_chunk``).
         """
-        from .text_utils import TextCleaner
-        from .utils import _load_reference_mel
+        from .utils import _load_reference_mel, encode_text_for_inference
 
         device = self.device
         raw_text = batch["raw_text"]
 
-        text_cleaner = TextCleaner()
-        tokens = torch.LongTensor(text_cleaner(raw_text)).unsqueeze(0).to(device)
-        if tokens.numel() == 0:
+        try:
+            tokens = encode_text_for_inference(
+                self,
+                raw_text,
+                batch.get("language"),
+                batch.get("text_representation"),
+            ).to(device)
+        except ValueError as e:
+            logger.error(f"Skipping {batch.get('basename', raw_text)!r}: {e}")
             return None
 
         input_lengths = torch.LongTensor([tokens.size(1)]).to(device)
@@ -1435,9 +1441,20 @@ class StyleTTS2Module(L.LightningModule):
 
             self._mel_transform = make_mel_transform(self.config).to(device)
 
-        ref_mel = _load_reference_mel(
-            batch["reference_path"], self.sr, self._mel_transform
-        ).to(device)
+        # Reference-style embeddings are expensive to compute (a disk read plus
+        # two encoder forward passes) and, once text chunking is in play, the
+        # same reference_path can recur across many chunks of one utterance --
+        # cache by path so it's only ever computed once per predict() run.
+        reference_path = batch["reference_path"]
+        if not hasattr(self, "_ref_s_cache"):
+            self._ref_s_cache = {}
+        ref_s = self._ref_s_cache.get(str(reference_path))
+        if ref_s is None:
+            ref_mel = _load_reference_mel(
+                reference_path, self.sr, self._mel_transform
+            ).to(device)
+            ref_s = self._encode_reference(ref_mel)
+            self._ref_s_cache[str(reference_path)] = ref_s
 
         lang_emb = None
         if (
@@ -1450,7 +1467,7 @@ class StyleTTS2Module(L.LightningModule):
         wav = self._synthesize_text(
             tokens,
             input_lengths,
-            ref_mel=ref_mel,
+            ref_s=ref_s,
             diffusion_steps=batch.get("diffusion_steps", 5),
             embedding_scale=batch.get("embedding_scale", 1.0),
             acoustic_blend=batch.get("acoustic_blend", 0.3),
@@ -1466,6 +1483,7 @@ class StyleTTS2Module(L.LightningModule):
             "language": batch["language"],
             "raw_text": raw_text,
             "duration_seconds": len(wav) / self.sr,
+            "is_last_input_chunk": batch.get("is_last_input_chunk", True),
         }
 
     # ------------------------------------------------------------------
