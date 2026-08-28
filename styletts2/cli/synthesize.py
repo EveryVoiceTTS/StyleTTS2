@@ -13,8 +13,8 @@ import typer
 from everyvoice import logger
 from everyvoice.base_cli import command, default_typer_args
 from everyvoice.base_cli.interfaces import typer_file_option
-from everyvoice.config.type_definitions import DatasetTextRepresentation
-from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.type_definitions import (
+from everyvoice.config.type_definitions import (
+    DatasetTextRepresentation,
     SynthesizeOutputFormats,
 )
 

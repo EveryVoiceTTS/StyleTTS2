@@ -13,57 +13,28 @@ from everyvoice import logger
 from everyvoice.base_cli.prediction_writing_callback import (
     BasePredictionWritingCallback,
 )
-from everyvoice.config.type_definitions import DatasetTextRepresentation
-from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.prediction_writing_callback import (
-    resolve_chunked_basename,
-)
-from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.type_definitions import (
+from everyvoice.config.type_definitions import (
+    DatasetTextRepresentation,
     SynthesizeOutputFormats,
 )
-from everyvoice.model.feature_prediction.FastSpeech2_lightning.fs2.utils import (
-    truncate_basename,
-)
-from everyvoice.text.textsplit import chunk_text
-from everyvoice.utils import slugify
+from everyvoice.text.textsplit import chunk_text, resolve_split_params
+from everyvoice.utils import resolve_chunked_basename, slugify, truncate_basename
 from torch.utils.data import DataLoader, Dataset
 
 
 def get_styletts2_text_split_params(
-    module, language: Optional[str], text_representation: DatasetTextRepresentation
+    module,
+    language: Optional[str],
+    text_representation: DatasetTextRepresentation | None = None,
 ) -> "tuple[bool, tuple[int, int, str, str]]":
-    """Calculate text-chunking parameters for StyleTTS2, mirroring FastSpeech2's
-    ``get_text_split_params``.
+    """Calculate text-chunking parameters for StyleTTS2.
 
-    StyleTTS2 has no per-model length statistics (unlike FastSpeech2's ``Stats``,
-    saved at training time), so ``desired_length``/``max_length`` always fall
-    back to the same hardcoded defaults FastSpeech2 itself uses for older
-    models that lack stats.
+    StyleTTS2 has no per-model length statistics, so ``desired_length``/
+    ``max_length`` keep ``resolve_split_params``'s defaults; only the boundary
+    lookup depends on the checkpoint's ``TextConfig``. ``text_representation`` is
+    accepted for call-site symmetry with FastSpeech2 but unused here.
     """
-    text_config = module.config["ev_config"].text
-    split_text: bool = text_config.split_text
-
-    strong_boundaries = ""
-    weak_boundaries = ""
-    desired_length = 100
-    max_length = 200
-
-    if split_text:
-        try:
-            effective_language = language or ""
-            strong_boundaries = text_config.boundaries[effective_language].strong
-            weak_boundaries = text_config.boundaries[effective_language].weak
-        except KeyError:
-            logger.warning(
-                f"Boundaries for language '{language}' could not be found in "
-                "TextConfig. Chunking will not be performed."
-            )
-
-    return split_text, (
-        int(desired_length),
-        int(max_length),
-        strong_boundaries,
-        weak_boundaries,
-    )
+    return resolve_split_params(module.config["ev_config"].text, language)
 
 
 def build_text_entries(
