@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchaudio
+from everyvoice import logger
 from monotonic_align.core import maximum_path_c
 from munch import Munch
 
@@ -154,6 +155,13 @@ def encode_text_for_inference(
     indices = module._ev_encoder.encode_token_sequence(token_string)
     if not indices:
         raise ValueError(f"Text produced no tokens: {raw_text!r}")
+
+    logger.info(
+        "StyleTTS2 inference text processing: "
+        f"raw_text={raw_text!r} text_representation={text_representation.value!r} "
+        f"target_text_representation_level={target_level.value!r} "
+        f"token_string={token_string!r} indices={indices!r}"
+    )
 
     return torch.LongTensor(indices).unsqueeze(0)
 
