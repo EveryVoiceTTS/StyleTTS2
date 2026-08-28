@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "styletts2"
-version = "0.1.0"
+dynamic = ["version"]
 description = "StyleTTS2: TTS through style diffusion and adversarial training with large speech language models"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -39,18 +39,30 @@ classifiers = [
   "Typing :: Typed",
 ]
 requires-python = ">=3.10, <3.13"
-dependencies = ["everyvoice==0.5.0"]
+dependencies = [
+  "everyvoice==0.5.0",
+]
 
 [project.optional-dependencies]
 dev = [
   "everyvoice[dev]",
-  "everyvoice[test]",
 ]
+
 [project.scripts]
 styletts2 = "styletts2.cli:app"
 
+[tool.uv]
+override-dependencies = [
+  # replace unmaintained pydub, which gradio requests, by pydub_ng
+  "pydub; python_version < '0'",
+  "pydub-ng>=0.2.0",
+]
+
+[tool.hatch.version]
+path = "styletts2/_version.py"
+
 # ---------------------------------------------------------------------------
-# uv configuration
+# configuration of pre-commit tools
 # ---------------------------------------------------------------------------
 
 [tool.isort]
