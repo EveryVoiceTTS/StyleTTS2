@@ -20,33 +20,33 @@ from everyvoice.config.type_definitions import (
 
 
 def load_styletts2_model(model_path: Path, device):
-    """Load a StyleTTS2 Lightning module and mel transform from a checkpoint."""
+    """Load a StyleTTS2 model and mel transform from a checkpoint."""
     import torch
 
-    from ..lightning import StyleTTS2Module
+    from ..lightning import StyleTTS2
     from ..utils import make_mel_transform
 
     checkpoint = torch.load(model_path, map_location="cpu", weights_only=True)
 
-    module = StyleTTS2Module()
-    module.on_load_checkpoint(checkpoint)
-    module.load_state_dict(checkpoint["state_dict"])
-    module.to(device)
-    module.eval()
+    model = StyleTTS2()
+    model.on_load_checkpoint(checkpoint)
+    model.load_state_dict(checkpoint["state_dict"])
+    model.to(device)
+    model.eval()
 
-    mel_transform = make_mel_transform(module.config).to(device)
-    return module, mel_transform
+    mel_transform = make_mel_transform(model.config).to(device)
+    return model, mel_transform
 
 
 def load_reference_style(
-    module,
+    model,
     mel_transform,
     reference_path: Path,
     device,
 ):
     """Load a reference audio file and return a pre-computed style encoding.
 
-    Runs ``_load_reference_mel`` then ``module._encode_reference``, returning
+    Runs ``_load_reference_mel`` then ``model._encode_reference``, returning
     ``ref_s`` of shape ``[1, 256]`` on ``device``.  Call this at startup to
     avoid re-computing on every synthesis request.
     """
@@ -57,14 +57,14 @@ def load_reference_style(
     )
 
     with torch.no_grad():
-        ref_mel = _load_reference_mel(reference_path, module.sr, mel_transform).to(
+        ref_mel = _load_reference_mel(reference_path, model.sr, mel_transform).to(
             device
         )
-        return module._encode_reference(ref_mel)
+        return model._encode_reference(ref_mel)
 
 
 def synthesize_one(
-    module,
+    model,
     mel_transform,
     text: str,
     device,
@@ -80,10 +80,10 @@ def synthesize_one(
 
     Works only with stage-2 (or finetune) checkpoints that include the
     diffusion sampler.  Stage-1 checkpoints will raise an AttributeError
-    because ``module._sampler`` does not exist.
+    because ``model._sampler`` does not exist.
 
     ``language`` selects the language embedding for multilingual checkpoints
-    (must be a key of ``module.lang2id``); ignored for monolingual checkpoints.
+    (must be a key of ``model.lang2id``); ignored for monolingual checkpoints.
     ``text_representation`` indicates whether ``text`` is raw characters (the
     default) or already-phonemized IPA; see ``encode_text_for_inference``.
     """
@@ -96,20 +96,20 @@ def synthesize_one(
 
     with torch.no_grad():
         tokens = encode_text_for_inference(
-            module, text, language, text_representation
+            model, text, language, text_representation
         ).to(device)
 
         input_lengths = torch.LongTensor([tokens.size(1)]).to(device)
-        ref_mel = _load_reference_mel(reference_path, module.sr, mel_transform).to(
+        ref_mel = _load_reference_mel(reference_path, model.sr, mel_transform).to(
             device
         )
 
         lang_emb = None
-        if hasattr(module, "language_embedding") and language in module.lang2id:
-            lang_id = torch.LongTensor([module.lang2id[language]])
-            lang_emb = module._lang_emb(lang_id)
+        if hasattr(model, "language_embedding") and language in model.lang2id:
+            lang_id = torch.LongTensor([model.lang2id[language]])
+            lang_emb = model._lang_emb(lang_id)
 
-        return module._synthesize_text(
+        return model._synthesize_text(
             tokens,
             input_lengths,
             ref_mel=ref_mel,
@@ -292,16 +292,16 @@ def synthesize(
     )
 
     logger.info(f"Loading StyleTTS2 model from {model_path}")
-    module, mel_transform = load_styletts2_model(model_path, device)
-    module._mel_transform = mel_transform
+    model, mel_transform = load_styletts2_model(model_path, device)
+    model._mel_transform = mel_transform
 
-    language = language or next(iter(module.lang2id.keys()), None)
+    language = language or next(iter(model.lang2id.keys()), None)
 
     state = torch.load(model_path, map_location="cpu", weights_only=True)
     global_step = int(state.get("global_step", 0))
 
     split_text, split_params = get_styletts2_text_split_params(
-        module, language, text_representation
+        model, language, text_representation
     )
 
     try:
@@ -321,7 +321,7 @@ def synthesize(
             )
         else:
             assert filelist is not None
-            filelist_loader = module.config["ev_config"].training.filelist_loader
+            filelist_loader = model.config["ev_config"].training.filelist_loader
             entries = build_filelist_entries(
                 filelist_loader(filelist),
                 str(reference) if reference else None,
@@ -342,7 +342,7 @@ def synthesize(
         output_type,
         output_dir,
         global_step,
-        module.sr,
+        model.sr,
         simple_filenames=simple_filenames,
     )
     if not callbacks:
@@ -358,6 +358,6 @@ def synthesize(
         enable_progress_bar=True,
         enable_model_summary=False,
     )
-    trainer.predict(module, datamodule=datamodule)
+    trainer.predict(model, datamodule=datamodule)
 
     logger.info(f"Synthesis complete. Output saved to {output_dir}")

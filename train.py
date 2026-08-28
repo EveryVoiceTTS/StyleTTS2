@@ -11,7 +11,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.strategies import DDPStrategy
 
-from styletts2.lightning import StyleTTS2DataModule, StyleTTS2Module
+from styletts2.lightning import StyleTTS2, StyleTTS2DataModule
 
 
 class Mode(str, Enum):
@@ -53,7 +53,7 @@ def main(
     max_epochs = config.get(epochs_key, 200)
 
     datamodule = StyleTTS2DataModule(config, load_for_everyvoice=False)
-    model = StyleTTS2Module(config, mode=mode.value)
+    model = StyleTTS2(config, mode=mode.value)
 
     tb_logger = TensorBoardLogger(save_dir=log_dir, name="tensorboard", version="")
 

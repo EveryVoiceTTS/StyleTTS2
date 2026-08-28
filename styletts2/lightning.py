@@ -205,8 +205,12 @@ class StyleTTS2DataModule(L.LightningDataModule):
 # Lightning module
 # ---------------------------------------------------------------------------
 
+# Class names that earlier releases wrote into ``checkpoint["model_info"]["name"]``
+# for what is now ``StyleTTS2``.  Checkpoints carrying these still load.
+_LEGACY_CLASS_NAMES = frozenset({"StyleTTS2Module"})
 
-class StyleTTS2Module(L.LightningModule):
+
+class StyleTTS2(L.LightningModule):
     """Unified LightningModule for first-stage, second-stage, and fine-tuning.
 
     Args:
@@ -214,7 +218,7 @@ class StyleTTS2Module(L.LightningModule):
         mode: one of ``'first'``, ``'second'``, or ``'finetune'``.
     """
 
-    _VERSION: str = "1.0"
+    _VERSION: str = "1.1"
 
     def __init__(self, config: dict | None = None, mode: str = "first"):
         super().__init__()
@@ -449,16 +453,13 @@ class StyleTTS2Module(L.LightningModule):
         from pathlib import Path
 
         if hasattr(config, "model_dump"):
-            return StyleTTS2Module._config_to_checkpoint_safe(
-                config.model_dump(mode="json")
-            )
+            return StyleTTS2._config_to_checkpoint_safe(config.model_dump(mode="json"))
         if isinstance(config, dict):
             return {
-                k: StyleTTS2Module._config_to_checkpoint_safe(v)
-                for k, v in config.items()
+                k: StyleTTS2._config_to_checkpoint_safe(v) for k, v in config.items()
             }
         if isinstance(config, (list, tuple)):
-            return [StyleTTS2Module._config_to_checkpoint_safe(x) for x in config]
+            return [StyleTTS2._config_to_checkpoint_safe(x) for x in config]
         if isinstance(config, Path):
             return str(config)
         if isinstance(config, enum.Enum):
@@ -498,7 +499,10 @@ class StyleTTS2Module(L.LightningModule):
         )
 
         ckpt_model_type = model_info.get("name", "MISSING_TYPE")
-        if ckpt_model_type != self.__class__.__name__:
+        if (
+            ckpt_model_type != self.__class__.__name__
+            and ckpt_model_type not in _LEGACY_CLASS_NAMES
+        ):
             raise TypeError(
                 f"""Wrong model type ({ckpt_model_type}), we are expecting a '{self.__class__.__name__}' model"""
             )
@@ -512,6 +516,13 @@ class StyleTTS2Module(L.LightningModule):
         if ckpt_version < Version("1.0"):
             # Upgrading from 0.0 to 1.0 requires no changes; future versions might require changes
             checkpoint["model_info"]["version"] = "1.0"
+        if ckpt_version < Version("1.1"):
+            # 1.1 renamed the class from StyleTTS2Module to StyleTTS2.
+            mi = checkpoint.setdefault(
+                "model_info", {"name": self.__class__.__name__, "version": "1.0"}
+            )
+            mi["name"] = self.__class__.__name__
+            mi["version"] = "1.1"
 
         return checkpoint
 
@@ -1713,3 +1724,9 @@ class StyleTTS2Module(L.LightningModule):
                     self._val_batch["ref_mels"] = _pad_and_cat(
                         self._val_batch["ref_mels"], new["ref_mels"][:n_take]
                     )
+
+
+# Deprecated alias.  This class was ``StyleTTS2Module`` before EveryVoice
+# standardized model class names on the architecture name (cf. ``FastSpeech2``,
+# ``HiFiGAN``).  Kept so old imports keep resolving; prefer ``StyleTTS2``.
+StyleTTS2Module = StyleTTS2

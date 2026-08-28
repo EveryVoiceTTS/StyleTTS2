@@ -38,7 +38,7 @@ def _load_reference_mel(path, target_sr, mel_transform):
 
 
 def encode_text_for_inference(
-    module,
+    model,
     raw_text: str,
     language: str | None,
     text_representation=None,
@@ -51,7 +51,7 @@ def encode_text_for_inference(
     the model's own ``TextConfig``).
 
     Args:
-        module: a ``StyleTTS2Module`` with an EveryVoice ``config["ev_config"]``.
+        model: a ``StyleTTS2`` with an EveryVoice ``config["ev_config"]``.
         raw_text: the text to synthesize, as typed/passed by the caller.
         language: the language tag for the utterance (used to select a g2p engine
             and to look up ``to_replace``/cleaner rules); pass ``None`` for "und".
@@ -82,14 +82,14 @@ def encode_text_for_inference(
     if text_representation is None:
         text_representation = DatasetTextRepresentation.characters
 
-    if not isinstance(module.config, dict) or "ev_config" not in module.config:
+    if not isinstance(model.config, dict) or "ev_config" not in model.config:
         raise ValueError(
             "This checkpoint has no EveryVoice configuration attached "
             "('ev_config'), so text cannot be normalized/phonemized for "
             "inference. This feature requires a model trained via "
             "'everyvoice train text-to-wav'."
         )
-    ev_config = module.config["ev_config"]
+    ev_config = model.config["ev_config"]
     target_level = ev_config.model.target_text_representation_level
 
     if target_level == TargetTrainingTextRepresentationLevel.phonological_features:
@@ -107,12 +107,12 @@ def encode_text_for_inference(
             f"{text_representation.value} which is incompatible."
         )
 
-    if not hasattr(module, "_text_processor"):
-        module._text_processor = TextProcessor(
+    if not hasattr(model, "_text_processor"):
+        model._text_processor = TextProcessor(
             ev_config.text, target_text_representation_level=target_level
         )
-    if not hasattr(module, "_ev_encoder"):
-        module._ev_encoder = EVStyleTTS2TextEncoder(
+    if not hasattr(model, "_ev_encoder"):
+        model._ev_encoder = EVStyleTTS2TextEncoder(
             ev_config.text, ev_config.pretrained.pretrained_symbols
         )
 
@@ -123,7 +123,7 @@ def encode_text_for_inference(
         )
 
     if language is None:
-        language = next(iter(getattr(module, "lang2id", None) or {}), None)
+        language = next(iter(getattr(model, "lang2id", None) or {}), None)
     item: dict = {"language": language or "und"}
     if text_representation == DatasetTextRepresentation.characters:
         item["characters"] = raw_text
@@ -132,7 +132,7 @@ def encode_text_for_inference(
 
     characters, phones, _pfs = Preprocessor.process_text(
         item,
-        text_processor=module._text_processor,
+        text_processor=model._text_processor,
         use_pfs=False,
         encode_as_string=True,
     )
@@ -158,7 +158,7 @@ def encode_text_for_inference(
             )
         raise ValueError(f"Text produced no tokens: {raw_text!r}")
 
-    indices = module._ev_encoder.encode_token_sequence(token_string)
+    indices = model._ev_encoder.encode_token_sequence(token_string)
     if not indices:
         raise ValueError(f"Text produced no tokens: {raw_text!r}")
 

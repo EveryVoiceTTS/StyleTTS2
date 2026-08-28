@@ -60,8 +60,8 @@ def train(
             to_native_config,
         )
         from ..lightning import (
+            StyleTTS2,
             StyleTTS2DataModule,
-            StyleTTS2Module,
         )
 
     config_file: Path = kwargs["config_file"]
@@ -172,7 +172,7 @@ def train(
     )
 
     datamodule = StyleTTS2DataModule(config, load_for_everyvoice=True)
-    model = StyleTTS2Module(config, mode=mode.value)
+    model = StyleTTS2(config, mode=mode.value)
 
     resume_ckpt = (
         str(tr.finetune_checkpoint)

@@ -250,7 +250,7 @@ class TestEncodeTextForInference:
     old flat TextCleaner lookup at inference time with the same
     normalize/to_replace/G2P pipeline used at training time."""
 
-    def _make_module(self, target_text_representation_level, **text_kwargs):
+    def _make_model(self, target_text_representation_level, **text_kwargs):
         import string
 
         from everyvoice.config.text_config import Symbols, TextConfig
@@ -270,12 +270,12 @@ class TestEncodeTextForInference:
             **_CONTACT,
         )
 
-        class _FakeModule:
+        class _FakeModel:
             pass
 
-        module = _FakeModule()
-        module.config = {"ev_config": config}
-        return module
+        model = _FakeModel()
+        model.config = {"ev_config": config}
+        return model
 
     def test_characters_trained_model_encodes_characters(self):
         from everyvoice.config.type_definitions import (
@@ -284,8 +284,8 @@ class TestEncodeTextForInference:
 
         from styletts2.utils import encode_text_for_inference
 
-        module = self._make_module(TargetTrainingTextRepresentationLevel.characters)
-        tokens = encode_text_for_inference(module, "hello", "eng")
+        model = self._make_model(TargetTrainingTextRepresentationLevel.characters)
+        tokens = encode_text_for_inference(model, "hello", "eng")
         assert tokens.numel() > 0
 
     def test_characters_trained_model_rejects_phones_input(self):
@@ -296,10 +296,10 @@ class TestEncodeTextForInference:
 
         from styletts2.utils import encode_text_for_inference
 
-        module = self._make_module(TargetTrainingTextRepresentationLevel.characters)
+        model = self._make_model(TargetTrainingTextRepresentationLevel.characters)
         with pytest.raises(ValueError):
             encode_text_for_inference(
-                module, "h ɛ l oʊ", "eng", DatasetTextRepresentation.ipa_phones
+                model, "h ɛ l oʊ", "eng", DatasetTextRepresentation.ipa_phones
             )
 
     def test_phones_trained_model_auto_phonemizes_characters(self):
@@ -312,8 +312,8 @@ class TestEncodeTextForInference:
 
         from styletts2.utils import encode_text_for_inference
 
-        module = self._make_module(TargetTrainingTextRepresentationLevel.ipa_phones)
-        tokens = encode_text_for_inference(module, "hello", "eng")
+        model = self._make_model(TargetTrainingTextRepresentationLevel.ipa_phones)
+        tokens = encode_text_for_inference(model, "hello", "eng")
         assert tokens.numel() > 0
 
     def test_phonological_features_not_implemented(self):
@@ -323,22 +323,22 @@ class TestEncodeTextForInference:
 
         from styletts2.utils import encode_text_for_inference
 
-        module = self._make_module(
+        model = self._make_model(
             TargetTrainingTextRepresentationLevel.phonological_features
         )
         with pytest.raises(NotImplementedError):
-            encode_text_for_inference(module, "hello", "eng")
+            encode_text_for_inference(model, "hello", "eng")
 
     def test_missing_ev_config_raises(self):
         from styletts2.utils import encode_text_for_inference
 
-        class _FakeModule:
+        class _FakeModel:
             pass
 
-        module = _FakeModule()
-        module.config = {}
+        model = _FakeModel()
+        model.config = {}
         with pytest.raises(ValueError):
-            encode_text_for_inference(module, "hello", "eng")
+            encode_text_for_inference(model, "hello", "eng")
 
     def test_to_replace_applied(self):
         """A to_replace rule should be applied before tokenization, so text
@@ -350,17 +350,44 @@ class TestEncodeTextForInference:
 
         from styletts2.utils import encode_text_for_inference
 
-        module_with_replace = self._make_module(
+        model_with_replace = self._make_model(
             TargetTrainingTextRepresentationLevel.characters,
             to_replace={"&": "and"},
         )
-        module_plain = self._make_module(
-            TargetTrainingTextRepresentationLevel.characters
-        )
+        model_plain = self._make_model(TargetTrainingTextRepresentationLevel.characters)
         with_replace = encode_text_for_inference(
-            module_with_replace, "cats & dogs", "eng"
+            model_with_replace, "cats & dogs", "eng"
         )
-        without_replace = encode_text_for_inference(
-            module_plain, "cats and dogs", "eng"
-        )
+        without_replace = encode_text_for_inference(model_plain, "cats and dogs", "eng")
         assert with_replace.tolist() == without_replace.tolist()
+
+
+class TestCheckpointClassNameCompat:
+    """check_and_upgrade_checkpoint accepts checkpoints written before the
+    StyleTTS2Module -> StyleTTS2 rename and migrates their model_info."""
+
+    def test_legacy_class_name_is_accepted_and_migrated(self):
+        from styletts2.lightning import StyleTTS2
+
+        model = StyleTTS2()  # config=None -> no heavy init
+        checkpoint = {
+            "model_info": {"name": "StyleTTS2Module", "version": "1.0"},
+            "state_dict": {},
+        }
+        upgraded = model.check_and_upgrade_checkpoint(checkpoint)
+        assert upgraded["model_info"]["name"] == "StyleTTS2"
+        assert upgraded["model_info"]["version"] == "1.1"
+
+    def test_wrong_class_name_still_rejected(self):
+        from styletts2.lightning import StyleTTS2
+
+        model = StyleTTS2()
+        with pytest.raises(TypeError):
+            model.check_and_upgrade_checkpoint(
+                {"model_info": {"name": "FastSpeech2", "version": "1.0"}}
+            )
+
+    def test_alias_points_at_renamed_class(self):
+        from styletts2.lightning import StyleTTS2, StyleTTS2Module
+
+        assert StyleTTS2Module is StyleTTS2

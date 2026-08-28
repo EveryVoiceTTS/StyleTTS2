@@ -8,7 +8,7 @@ import torch
 import typer
 import yaml
 
-from styletts2.lightning import StyleTTS2Module
+from styletts2.lightning import StyleTTS2
 from styletts2.text_utils import TextCleaner
 from styletts2.utils import (
     _load_reference_mel,
@@ -45,18 +45,18 @@ def _phonemize(text, language):
 
 def load_model(config_path, checkpoint_path, mode, device):
     config = yaml.safe_load(open(config_path))
-    module = StyleTTS2Module(config, mode=mode)
+    model = StyleTTS2(config, mode=mode)
     state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    module.load_state_dict(state["state_dict"])
-    module.eval()
-    module.to(device)
+    model.load_state_dict(state["state_dict"])
+    model.eval()
+    model.to(device)
     mel_transform = make_mel_transform(config).to(device)
-    return module, mel_transform
+    return model, mel_transform
 
 
 @torch.no_grad()
 def synthesize(
-    module,
+    model,
     mel_transform,
     text,
     device,
@@ -73,15 +73,15 @@ def synthesize(
     input_lengths = torch.LongTensor([tokens.size(1)]).to(device)
     text_mask = length_to_mask(input_lengths).to(device)
 
-    bert_dur = module.bert(tokens, attention_mask=(~text_mask).int())
-    d_en = module.bert_encoder(bert_dur).transpose(-1, -2)
-    t_en = module.text_encoder(tokens, input_lengths, text_mask)
+    bert_dur = model.bert(tokens, attention_mask=(~text_mask).int())
+    d_en = model.bert_encoder(bert_dur).transpose(-1, -2)
+    t_en = model.text_encoder(tokens, input_lengths, text_mask)
 
-    ref_mel = _load_reference_mel(reference_path, module.sr, mel_transform).to(device)
-    ref_s = module._encode_reference(ref_mel)
+    ref_mel = _load_reference_mel(reference_path, model.sr, mel_transform).to(device)
+    ref_s = model._encode_reference(ref_mel)
 
     noise = torch.randn((1, 256), device=device).unsqueeze(1)
-    s_pred = module._sampler(
+    s_pred = model._sampler(
         noise=noise,
         embedding=bert_dur,
         embedding_scale=embedding_scale,
@@ -94,9 +94,9 @@ def synthesize(
 
     T = input_lengths[0].item()
     tm = text_mask[0, :T].unsqueeze(0)
-    d = module.predictor.text_encoder(d_en[0, :, :T].unsqueeze(0), s, input_lengths, tm)
-    x, _ = module.predictor.lstm(d)
-    duration = torch.sigmoid(module.predictor.duration_proj(x)).sum(axis=-1)
+    d = model.predictor.text_encoder(d_en[0, :, :T].unsqueeze(0), s, input_lengths, tm)
+    x, _ = model.predictor.lstm(d)
+    duration = torch.sigmoid(model.predictor.duration_proj(x)).sum(axis=-1)
     pred_dur = torch.round(duration.squeeze()).clamp(min=1)
     if pred_dur.ndim == 0:
         pred_dur = pred_dur.unsqueeze(0)
@@ -109,8 +109,8 @@ def synthesize(
         c += int(pred_dur[i].item())
 
     en = d.transpose(-1, -2) @ pred_aln.unsqueeze(0)
-    F0_pred, N_pred = module.predictor.F0Ntrain(en, s)
-    out = module.decoder(
+    F0_pred, N_pred = model.predictor.F0Ntrain(en, s)
+    out = model.decoder(
         t_en[0, :, :T].unsqueeze(0) @ pred_aln.unsqueeze(0),
         F0_pred,
         N_pred,
@@ -212,7 +212,7 @@ def main(
     os.makedirs(output_dir, exist_ok=True)
 
     typer.echo(f"Loading model from {checkpoint} …")
-    module, mel_transform = load_model(
+    model, mel_transform = load_model(
         config_path, checkpoint, mode=mode.value, device=device
     )
 
@@ -242,7 +242,7 @@ def main(
             continue
 
         audio = synthesize(
-            module,
+            model,
             mel_transform,
             raw_text,
             device,
@@ -254,7 +254,7 @@ def main(
         )
 
         out_path = os.path.join(output_dir, Path(stem).stem + ".wav")
-        sf.write(out_path, audio, module.sr)
+        sf.write(out_path, audio, model.sr)
         typer.echo(f"Wrote {out_path}")
 
 
