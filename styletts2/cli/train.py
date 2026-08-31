@@ -6,8 +6,14 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from everyvoice.base_cli.interfaces import train_base_command_interface
-from merge_args import merge_args
+from everyvoice.base_cli.interfaces import (
+    AcceleratorOption,
+    ConfigArgsOption,
+    ConfigFileArgument,
+    DevicesOption,
+    NodesOption,
+    StrategyOption,
+)
 
 
 class Mode(str, Enum):
@@ -16,8 +22,8 @@ class Mode(str, Enum):
     finetune = "finetune"
 
 
-@merge_args(train_base_command_interface)
 def train(
+    config_file: Annotated[Path, ConfigFileArgument],
     mode: Annotated[
         Mode,
         typer.Option(
@@ -32,7 +38,11 @@ def train(
             help="Floating-point precision passed to Lightning Trainer (e.g. '32', '16-mixed', 'bf16-mixed').",
         ),
     ] = "32",
-    **kwargs,
+    config_args: Annotated[list[str], ConfigArgsOption] = [],
+    accelerator: Annotated[str, AcceleratorOption] = "auto",
+    devices: Annotated[str, DevicesOption] = "auto",
+    nodes: Annotated[int, NodesOption] = 1,
+    strategy: Annotated[str, StrategyOption] = "ddp",
 ):
     """Train a StyleTTS2 end-to-end TTS model."""
     from everyvoice.utils import spinner
@@ -63,9 +73,6 @@ def train(
             StyleTTS2DataModule,
             StyleTTS2Module,
         )
-
-    config_file: Path = kwargs["config_file"]
-    config_args: list[str] = kwargs.get("config_args", [])
 
     ev_config = StyleTTS2Config.load_config_from_path(config_file)
     ev_config = update_config_from_cli_args(config_args, ev_config)
@@ -142,9 +149,6 @@ def train(
     )
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
-    devices = kwargs.get("devices", "auto")
-    strategy = kwargs.get("strategy", "ddp")
-
     # GAN training uses separate discriminator/generator backward passes,
     # so find_unused_parameters=True is required for DDP correctness.
     try:
@@ -161,8 +165,8 @@ def train(
     trainer = L.Trainer(
         max_epochs=max_epochs,
         devices=devices,
-        num_nodes=kwargs.get("nodes", 1),
-        accelerator=kwargs.get("accelerator", "auto"),
+        num_nodes=nodes,
+        accelerator=accelerator,
         strategy=resolved_strategy,
         precision=precision,
         logger=tb_logger,

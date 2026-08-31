@@ -1,10 +1,16 @@
+import multiprocessing as mp
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
 
 import typer
-from everyvoice.base_cli.interfaces import preprocess_base_command_interface
-from merge_args import merge_args
+from everyvoice.base_cli.interfaces import (
+    ConfigArgsOption,
+    ConfigFileArgument,
+    CPUsOption,
+    DebugFlag,
+    OverwriteFlag,
+)
 
 
 class PreprocessCategories(str, Enum):
@@ -12,17 +18,22 @@ class PreprocessCategories(str, Enum):
     text = "text"
 
 
-@merge_args(preprocess_base_command_interface)
+StepsOption = typer.Option(
+    "-s",
+    "--steps",
+    help="Which preprocessing steps to run. If none are provided, text and audio processing steps are performed.",
+)
+
+
 def preprocess(
-    steps: Annotated[
-        list[PreprocessCategories],
-        typer.Option(
-            "-s",
-            "--steps",
-            help="Which preprocessing steps to run. If none are provided, text and audio processing steps are performed.",
-        ),
-    ] = list(PreprocessCategories),
-    **kwargs,
+    config_file: Annotated[Path, ConfigFileArgument],
+    steps: Annotated[list[PreprocessCategories], StepsOption] = list(
+        PreprocessCategories
+    ),
+    config_args: Annotated[list[str], ConfigArgsOption] = [],
+    cpus: Annotated[int, CPUsOption] = min(4, mp.cpu_count()),
+    overwrite: Annotated[bool, OverwriteFlag] = False,
+    debug: Annotated[bool, DebugFlag] = False,
 ):
     """Preprocess audio and text data for StyleTTS2 training."""
     from everyvoice.utils import spinner
@@ -35,7 +46,11 @@ def preprocess(
     preprocessor, config, _ = preprocess_base_command(
         model_config=StyleTTS2Config,
         steps=[step.name for step in steps],
-        **kwargs,
+        config_file=config_file,
+        config_args=config_args,
+        cpus=cpus,
+        overwrite=overwrite,
+        debug=debug,
     )
 
     if not config.training.ood_raw_data:
