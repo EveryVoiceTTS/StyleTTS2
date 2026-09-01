@@ -1,7 +1,7 @@
 from functools import reduce
 from inspect import isfunction
 from math import ceil, floor, log2
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, TypeVar
 
 import torch
 from typing_extensions import TypeGuard
@@ -17,19 +17,17 @@ def iff(condition: bool, value: T) -> Optional[T]:
     return value if condition else None
 
 
-def is_sequence(obj: T) -> TypeGuard[Union[list, tuple]]:
+def is_sequence(obj: T) -> TypeGuard[list | tuple]:
     return isinstance(obj, list) or isinstance(obj, tuple)
 
 
-def default(
-    val: Optional[T], d: Union[Callable[..., T], T]
-) -> Union[Callable[..., T], T]:
+def default(val: Optional[T], d: Callable[..., T] | T) -> Callable[..., T] | T:
     if exists(val):
         return val
     return d() if isfunction(d) else d
 
 
-def to_list(val: Union[T, Sequence[T]]) -> List[T]:
+def to_list(val: T | Sequence[T]) -> List[T]:
     if isinstance(val, tuple):
         return list(val)
     if isinstance(val, list):
