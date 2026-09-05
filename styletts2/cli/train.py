@@ -51,6 +51,7 @@ def train(
         from everyvoice.utils import update_config_from_cli_args
         from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
         from lightning.pytorch.loggers import TensorBoardLogger
+        from lightning.pytorch.plugins.environments import SLURMEnvironment
         from lightning.pytorch.strategies import DDPStrategy
 
         from ..ev_config import (
@@ -116,6 +117,7 @@ def train(
         filename=ckpt_filename,
         save_top_k=1,
         save_last=True,
+        save_on_exception=True,
         every_n_train_steps=tr.ckpt_steps,
         every_n_epochs=tr.ckpt_epochs,
         enable_version_counter=True,
@@ -179,5 +181,15 @@ def train(
         if tr.finetune_checkpoint and os.path.exists(tr.finetune_checkpoint)
         else None
     )
+
+    # A checkpoint saved just before a SLURM requeue/preemption (via SIGUSR1)
+    # takes priority over finetune_checkpoint, so a requeued job resumes the
+    # progress made this run instead of restarting from the finetune source.
+    if SLURMEnvironment.detect():
+        try:
+            trainer.fit(model, datamodule=datamodule, ckpt_path="hpc")
+            return
+        except ValueError:
+            pass  # no HPC checkpoint yet; continue with normal startup below
 
     trainer.fit(model, datamodule=datamodule, ckpt_path=resume_ckpt)
