@@ -68,7 +68,7 @@ def train(
     config_args: list[str] = kwargs.get("config_args", [])
 
     ev_config = StyleTTS2Config.load_config_from_path(config_file)
-    ev_config = update_config_from_cli_args(config_args, ev_config)
+    update_config_from_cli_args(config_args, ev_config)
 
     config = to_native_config(ev_config)
 
