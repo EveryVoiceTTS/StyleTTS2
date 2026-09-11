@@ -25,12 +25,21 @@ def preprocess(
     from everyvoice.utils import spinner
 
     with spinner():
-        from everyvoice.base_cli.helpers import preprocess_base_command
+        from everyvoice.base_cli.helpers import (
+            load_config_base_command,
+            preprocess_base_command,
+        )
 
         from ..ev_config import StyleTTS2Config
 
-    preprocessor, config, _ = preprocess_base_command(
+    config = load_config_base_command(
         model_config=StyleTTS2Config,
+        config_file=kwargs.pop("config_file"),
+        config_args=kwargs.pop("config_args"),
+    )
+    assert isinstance(config, StyleTTS2Config)
+    preprocessor, _ = preprocess_base_command(
+        config=config,
         steps=[step.name for step in steps],
         **kwargs,
     )
@@ -52,6 +61,7 @@ def preprocess(
                 )
             )
         else:
+            assert source.local_path is not None  # guaranteed by "after" validator
             local_path = source.local_path
         resolved[lang] = (local_path, source.text_representation)
 
