@@ -1,14 +1,16 @@
 from enum import Enum
-from pathlib import Path
 
 import typer
 from everyvoice.base_cli.interfaces import preprocess_base_command_interface
 from merge_args import merge_args
 
+from .. import core
 
-class PreprocessCategories(str, Enum):
-    audio = "audio"
-    text = "text"
+PreprocessCategories = Enum(  # type: ignore[misc]
+    "PreprocessCategories",
+    {category: category for category in core.PREPROCESS_CATEGORIES},
+    type=str,
+)
 
 
 @merge_args(preprocess_base_command_interface)
@@ -21,48 +23,11 @@ def preprocess(
     ),
     **kwargs,
 ):
-    """Preprocess audio and text data for StyleTTS2 training."""
-    from everyvoice.utils import spinner
+    """Preprocess data for text-to-wav (StyleTTS2) training.
 
-    with spinner():
-        from everyvoice.base_cli.helpers import (
-            load_config_base_command,
-            preprocess_base_command,
-        )
-
-        from ..ev_config import StyleTTS2Config
-
-    config = load_config_base_command(
-        model_config=StyleTTS2Config,
-        config_file=kwargs.pop("config_file"),
-        config_args=kwargs.pop("config_args"),
+    **styletts2 preprocess config/everyvoice-text-to-wav.yaml**
+    """
+    config = core.load_config(
+        config_file=kwargs.pop("config_file"), config_args=kwargs.pop("config_args")
     )
-    assert isinstance(config, StyleTTS2Config)
-    preprocessor, _ = preprocess_base_command(
-        config=config,
-        steps=[step.name for step in steps],
-        **kwargs,
-    )
-
-    if not config.training.ood_raw_data:
-        return
-
-    resolved: dict[str, tuple[Path, object]] = {}
-    for lang, source in config.training.ood_raw_data.items():
-        if source.hf is not None:
-            from huggingface_hub import hf_hub_download
-
-            local_path = Path(
-                hf_hub_download(
-                    source.hf.repo_id,
-                    repo_type="dataset",
-                    filename=source.hf.filename,
-                    revision=source.hf.revision,
-                )
-            )
-        else:
-            assert source.local_path is not None  # guaranteed by "after" validator
-            local_path = source.local_path
-        resolved[lang] = (local_path, source.text_representation)
-
-    preprocessor.preprocess_ood(resolved)
+    core.preprocess(config, steps=[step.name for step in steps], **kwargs)
