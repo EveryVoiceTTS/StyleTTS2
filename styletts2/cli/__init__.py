@@ -10,15 +10,7 @@ app = typer.Typer(
     help="A StyleTTS2 end-to-end text-to-speech model configured via EveryVoice.",
 )
 
-command(
-    app,
-    name="preprocess",
-    short_help="Preprocess your data",
-    help=f"""Preprocess your data for StyleTTS2 training. For example:
-
-    **everyvoice preprocess text-to-wav config/{TEXT_TO_WAV_CONFIG_FILENAME_PREFIX}.yaml**
-    """,
-)(app_preprocess)
+command(app, name="preprocess")(app_preprocess)
 
 command(
     app,
