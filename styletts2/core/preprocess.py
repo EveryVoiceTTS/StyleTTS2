@@ -9,7 +9,7 @@ def load_config(
     config_file: Path,
     config_args: list[str] = [],
 ) -> "StyleTTS2Config":
-    """Load FastSpeech2 configuration from config_file, possibly overriding some parameters"""
+    """Load StyleTTS2 configuration from config_file, possibly overriding some parameters"""
     from everyvoice.utils import spinner
 
     with spinner():
