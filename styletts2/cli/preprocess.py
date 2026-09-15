@@ -23,7 +23,7 @@ def preprocess(
     ),
     **kwargs,
 ):
-    """Preprocess data for text-to-wav (StyleTTS2) training.
+    """Preprocess data for text-to-wav (StyleTTS2) training
 
     **styletts2 preprocess config/everyvoice-text-to-wav.yaml**
     """
