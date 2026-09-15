@@ -53,16 +53,9 @@ def train(
         from lightning.pytorch.loggers import TensorBoardLogger
         from lightning.pytorch.strategies import DDPStrategy
 
-        from ..ev_config import (
-            StyleTTS2Config,
-        )
-        from ..ev_config.translation import (
-            to_native_config,
-        )
-        from ..lightning import (
-            StyleTTS2,
-            StyleTTS2DataModule,
-        )
+        from ..ev_config import StyleTTS2Config
+        from ..ev_config.translation import to_native_config
+        from ..lightning import StyleTTS2, StyleTTS2DataModule
 
     config_file: Path = kwargs["config_file"]
     config_args: list[str] = kwargs.get("config_args", [])

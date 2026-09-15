@@ -52,9 +52,7 @@ def load_reference_style(
     """
     import torch
 
-    from ..utils import (
-        _load_reference_mel,
-    )
+    from ..utils import _load_reference_mel
 
     with torch.no_grad():
         ref_mel = _load_reference_mel(reference_path, model.sr, mel_transform).to(
@@ -89,10 +87,7 @@ def synthesize_one(
     """
     import torch
 
-    from ..utils import (
-        _load_reference_mel,
-        encode_text_for_inference,
-    )
+    from ..utils import _load_reference_mel, encode_text_for_inference
 
     with torch.no_grad():
         tokens = encode_text_for_inference(
