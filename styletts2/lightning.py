@@ -384,10 +384,20 @@ class StyleTTS2(L.LightningModule):
                     "Set pretrained_model in config to load a Stage 2 checkpoint directly."
                 )
 
-        # Freeze parameters never trained in this mode.
-        # DDP only allreduces params with requires_grad=True, so freezing unused
-        # networks eliminates the "unused parameters" DDP error without the
-        # overhead of find_unused_parameters=True.
+        self._freeze_for_mode()
+
+    def _freeze_for_mode(self):
+        """Freeze parameters never trained in this mode.
+
+        DDP only allreduces params with requires_grad=True, so freezing unused
+        networks eliminates the "unused parameters" DDP error without the
+        overhead of find_unused_parameters=True.
+
+        Must be re-run any time the sub-networks are rebuilt (e.g. by
+        on_load_checkpoint(), which reconstructs them via
+        initialize_from_config() and would otherwise silently undo the
+        freezing applied here from setup()).
+        """
         if self.mode == "first":
             for key in (
                 "bert",
@@ -427,6 +437,7 @@ class StyleTTS2(L.LightningModule):
         self.mode = hp.get("mode", self.mode)
 
         self.initialize_from_config(self.config, load_pretrained_weights=False)
+        self._freeze_for_mode()
 
         # Older checkpoints may have WavLM weights (wl.wavlm.*).  Drop them
         # before Lightning applies the state dict — they are unused at synthesis
