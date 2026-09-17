@@ -1,3 +1,5 @@
+from os import PathLike
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -22,13 +24,13 @@ def make_mel_transform(config):
     )
 
 
-def _load_reference_mel(path, target_sr, mel_transform):
+def _load_reference_mel(path: str | PathLike, target_sr, mel_transform):
     """Load and normalise a reference audio file into a mel spectrogram.
 
     Returns a tensor of shape ``[1, n_mels, T]`` on the same device as
     ``mel_transform``.
     """
-    wave, sr = torchaudio.load(path)
+    wave, sr = torchaudio.load(str(path))
     wave = wave.mean(0)
     if sr != target_sr:
         wave = torchaudio.functional.resample(wave, sr, target_sr)

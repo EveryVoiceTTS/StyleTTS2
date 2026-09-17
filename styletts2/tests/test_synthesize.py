@@ -201,7 +201,7 @@ class TestStyleTTS2PredictionWritingWavCallback:
 
         import torchaudio
 
-        waveform, _ = torchaudio.load(written_files[0])
+        waveform, _ = torchaudio.load(str(written_files[0]))
         # Concatenated length of both chunks' waveforms.
         assert waveform.shape[-1] == 250
 
