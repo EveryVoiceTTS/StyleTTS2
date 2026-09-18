@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from everyvoice.config.type_definitions import DatasetTextRepresentation
+
 if TYPE_CHECKING:
     from ..ev_config import StyleTTS2Config
 
@@ -46,7 +48,7 @@ def preprocess(
     if not config.training.ood_raw_data:
         return
 
-    resolved: dict[str, tuple[Path, object]] = {}
+    resolved: dict[str, tuple[Path, DatasetTextRepresentation]] = {}
     for lang, source in config.training.ood_raw_data.items():
         if source.hf is not None:
             from huggingface_hub import hf_hub_download
