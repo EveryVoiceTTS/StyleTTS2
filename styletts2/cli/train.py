@@ -53,7 +53,8 @@ def train(
             )
 
         import lightning as L
-        from everyvoice.utils import update_config_from_cli_args
+        from everyvoice.base_cli.helpers import load_config_base_command
+        from everyvoice.text.lookups import lookuptables_from_config
         from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
         from lightning.pytorch.loggers import TensorBoardLogger
         from lightning.pytorch.strategies import DDPStrategy
@@ -62,15 +63,15 @@ def train(
         from ..ev_config.translation import to_native_config
         from ..lightning import StyleTTS2, StyleTTS2DataModule
 
-    config_file: Path = kwargs["config_file"]
-    config_args: list[str] = kwargs.get("config_args", [])
-
-    ev_config = StyleTTS2Config.load_config_from_path(config_file)
-    update_config_from_cli_args(config_args, ev_config)
+    config_file: Path = kwargs.pop("config_file")
+    ev_config = load_config_base_command(
+        model_config=StyleTTS2Config,
+        config_args=kwargs.pop("config_args"),
+        config_file=config_file,
+    )
+    assert isinstance(ev_config, StyleTTS2Config)
 
     config = to_native_config(ev_config)
-
-    from everyvoice.text.lookups import lookuptables_from_config
 
     lang2id, _ = lookuptables_from_config(ev_config)
     if ev_config.model.multilingual and not lang2id:
