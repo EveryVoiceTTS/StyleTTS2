@@ -47,3 +47,37 @@ def preprocess(
         overwrite=overwrite,
         debug=debug,
     )
+
+
+def train(
+    config: "StyleTTS2Config",
+    config_file: str | Path | None = None,
+    mode: str | core.TrainingMode = "first",
+    precision: str = "32",
+    accelerator: str = "auto",
+    devices: str | int = "auto",
+    nodes: int = 1,
+    strategy: str = "ddp",
+):
+    """Train an end-to-end (StyleTTS2) model
+
+    Args:
+        config (StyleTTS2Config): your StyleTTS2 configuration
+        config_file (str | Path | None): for logging purposes only -- if provided, the logs will include a copy of this file
+        mode ("first" | "second" | "finetune"): Training mode: "first" (acoustic pre-training with TMS), "second" (joint diffusion+adversarial), or "finetune"
+        precision (str): Floating-point precision passed to Lightning Trainer (e.g., "32", "16-mixed", "bf16-mixed")
+        accelerator (str): PyTorch Lightning Accelerator to use: https://pytorch-lightning.readthedocs.io/en/stable/extensions/accelerator.html
+        devices ("auto" | str | int): the number of GPUs to use on each node as a str or int; use "auto" to let pytoch-lightning decide
+        nodes (int): the number of nodes to use
+        strategy (str): the strategy for data parallelization: https://pytorch-lightning.readthedocs.io/en/stable/accelerators/gpu_intermediate.html"
+    """
+    core.train(
+        config=config,
+        config_file=config_file,
+        mode=core.TrainingMode(mode),
+        precision=precision,
+        accelerator=accelerator,
+        devices=str(devices),
+        nodes=nodes,
+        strategy=strategy,
+    )
