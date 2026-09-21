@@ -5,19 +5,19 @@ from everyvoice.base_cli.interfaces import train_base_command_interface
 from merge_args import merge_args
 
 from .. import core
-from ..core.train import Mode
+from ..core.train import TrainingMode
 
 
 @merge_args(train_base_command_interface)
 def train(
     mode: Annotated[
-        Mode,
+        TrainingMode,
         typer.Option(
             "-m",
             "--mode",
             help="Training mode: 'first' (acoustic pre-training with TMA), 'second' (joint diffusion+adversarial), or 'finetune'.",
         ),
-    ] = Mode.first,
+    ] = TrainingMode.first,
     precision: Annotated[
         str,
         typer.Option(

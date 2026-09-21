@@ -5,11 +5,13 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import yaml
+
 if TYPE_CHECKING:
     from ..ev_config import StyleTTS2Config
 
 
-class Mode(str, Enum):
+class TrainingMode(str, Enum):
     first = "first"
     second = "second"
     finetune = "finetune"
@@ -17,8 +19,8 @@ class Mode(str, Enum):
 
 def train(
     config: "StyleTTS2Config",
-    config_file: Path,
-    mode: Mode,
+    config_file: str | Path | None,
+    mode: TrainingMode,
     precision: str,
     accelerator: str,
     devices: str,
@@ -60,21 +62,32 @@ def train(
     tr = ev_config.training
     max_epochs = (
         tr.epochs_1st
-        if mode == Mode.first
-        else tr.epochs_2nd if mode == Mode.second else tr.max_epochs
+        if mode == TrainingMode.first
+        else tr.epochs_2nd if mode == TrainingMode.second else tr.max_epochs
     )
 
     log_dir = native_config["log_dir"]
     os.makedirs(log_dir, exist_ok=True)
-    shutil.copy(str(config_file), os.path.join(log_dir, config_file.name))
+    if config_file is not None:
+        config_file_s = str(config_file)
+        shutil.copy(config_file_s, os.path.join(log_dir, config_file_s))
+    # Log the full in-memory config object as really used, including any
+    # --config-args overrides on the CLI or programmatic changes to config
+    with open(
+        os.path.join(log_dir, "effective-text-to-wav-config.yaml"),
+        mode="w",
+        encoding="utf-8",
+    ) as f:
+        config_dict = ev_config.model_dump()
+        yaml.dump(config_dict, f, default_flow_style=None, allow_unicode=True)
 
     # Stage 1 and stage 2 share the same log_dir; give each mode its own
     # tensorboard sub-run so stage 2's restarted step/epoch counters don't
     # get drawn as a continuation of stage 1's curve.
     mode_sub_dirs = {
-        Mode.first: "stage-1",
-        Mode.second: "stage-2",
-        Mode.finetune: "finetune",
+        TrainingMode.first: "stage-1",
+        TrainingMode.second: "stage-2",
+        TrainingMode.finetune: "finetune",
     }
     tb_logger = TensorBoardLogger(
         save_dir=tr.logger.save_dir,
@@ -99,9 +112,9 @@ def train(
     # Stage 1 and stage 2 share the same checkpoints dir; name the "last"
     # checkpoint per-mode so stage 2 doesn't replace stage 1's checkpoint.
     mode_ckpt_names = {
-        Mode.first: "stage-1-last",
-        Mode.second: "stage-2-last",
-        Mode.finetune: "finetune-last",
+        TrainingMode.first: "stage-1-last",
+        TrainingMode.second: "stage-2-last",
+        TrainingMode.finetune: "finetune-last",
     }
     last_ckpt_callback.CHECKPOINT_NAME_LAST = mode_ckpt_names[mode]
     # Keep only the top-k checkpoints ranked by val/mel (lower is better).
