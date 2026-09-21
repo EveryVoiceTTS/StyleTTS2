@@ -19,7 +19,7 @@ from everyvoice.config.type_definitions import (
 
 
 def load_styletts2_model(model_path: Path, device):
-    """Load a StyleTTS2 model and mel transform from a checkpoint."""
+    """Load a StyleTTS2 model and mel transform from a checkpoint"""
     import torch
 
     from ..lightning import StyleTTS2
@@ -43,7 +43,7 @@ def load_reference_style(
     reference_path: Path,
     device,
 ):
-    """Load a reference audio file and return a pre-computed style encoding.
+    """Load a reference audio file and return a pre-computed style encoding
 
     Runs ``_load_reference_mel`` then ``model._encode_reference``, returning
     ``ref_s`` of shape ``[1, 256]`` on ``device``.  Call this at startup to
@@ -73,7 +73,7 @@ def synthesize_one(
     language: str | None = None,
     text_representation: DatasetTextRepresentation | None = None,
 ):
-    """Synthesize a single utterance and return a float32 numpy waveform.
+    """Synthesize a single utterance and return a float32 numpy waveform
 
     Works only with stage-2 (or finetune) checkpoints that include the
     diffusion sampler.  Stage-1 checkpoints will raise an AttributeError
@@ -227,7 +227,7 @@ def synthesize(
         help="Blend weight for prosody style (0 = pure reference, 1 = pure diffusion).",
     ),
 ):
-    """Synthesize audio from text using a trained StyleTTS2 model.
+    """Synthesize audio from text using a trained StyleTTS2 model
 
     Examples:
 
