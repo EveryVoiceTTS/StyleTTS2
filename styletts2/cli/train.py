@@ -34,7 +34,12 @@ def train(
     ] = "32",
     **kwargs,
 ):
-    """Train a StyleTTS2 end-to-end TTS model."""
+    """Train an end-to-end (StyleTTS2) model
+
+    For example:
+
+    **styletts2 train config/everyvoice-text-to-wav.yaml --mode first**
+    """
     from everyvoice.utils import spinner
 
     with spinner():
