@@ -2,9 +2,9 @@
 
 import os
 import signal
+import sys
 import threading
 import time
-import unittest
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -63,7 +63,7 @@ def _dummy_tensors():
     return wave, text, mel
 
 
-class TestOODSamplingEVMode(unittest.TestCase):
+class TestOODSamplingEVMode:
     """OOD sampling path inside __getitem__ when preprocessed_dir is set."""
 
     def _make_dataset(self, pool, min_length):
@@ -104,8 +104,8 @@ class TestOODSamplingEVMode(unittest.TestCase):
         result = self._call_getitem(ds)
         ref_text_ood = result[4]
         inner = ref_text_ood[1:-1].tolist()  # strip leading/trailing boundary 0
-        self.assertGreater(len(inner), 5)
-        self.assertIn(_SPACE_IDX, inner)
+        assert len(inner) > 5
+        assert _SPACE_IDX in inner
 
     def test_timer_passes(self):
         with _time_limit(1):
@@ -117,10 +117,10 @@ class TestOODSamplingEVMode(unittest.TestCase):
                 time.sleep(2)
 
 
-class TestOODIndicesFromPSV(unittest.TestCase):
+class TestOODIndicesFromPSV:
     """OOD indices loaded from a real PSV file must map to valid symbol-table positions."""
 
-    def setUp(self):
+    def setup_method(self):
         from everyvoice.config.text_config import TextConfig
 
         from styletts2.ev_config import StyleTTS2PretrainedConfig
@@ -158,13 +158,13 @@ class TestOODIndicesFromPSV(unittest.TestCase):
         result = self._call_getitem()
         ref_text_ood = result[4]
         inner = ref_text_ood[1:-1].tolist()  # strip boundary tokens
-        self.assertGreater(len(inner), 0, "OOD tensor has no inner indices")
+        assert len(inner) > 0, "OOD tensor has no inner indices"
         for idx in inner:
-            self.assertGreaterEqual(idx, 0)
-            self.assertLess(idx, len(self.pretrained_symbols))
+            assert idx >= 0
+            assert idx < len(self.pretrained_symbols)
 
 
-class TestMultilingualLanguageId(unittest.TestCase):
+class TestMultilingualLanguageId:
     """language_id resolution in FilePathDataset._load_tensor_ev (EV mode)."""
 
     def _make_dataset(self, lang2id):
@@ -196,7 +196,7 @@ class TestMultilingualLanguageId(unittest.TestCase):
             "characters": "hi",
         }
         _, _, _, language_id = self._load(ds, item)
-        self.assertEqual(language_id, 1)
+        assert language_id == 1
 
     def test_defaults_language_id_to_zero_when_monolingual(self):
         ds = self._make_dataset(None)
@@ -207,10 +207,10 @@ class TestMultilingualLanguageId(unittest.TestCase):
             "characters": "hi",
         }
         _, _, _, language_id = self._load(ds, item)
-        self.assertEqual(language_id, 0)
+        assert language_id == 0
 
 
-class TestCollaterLangs(unittest.TestCase):
+class TestCollaterLangs:
     """The Collater must batch per-item language_ids into a `langs` tensor."""
 
     def test_langs_tensor_matches_per_item_language_ids(self):
@@ -228,8 +228,8 @@ class TestCollaterLangs(unittest.TestCase):
         collate = Collater(max_mel_length=10)
         result = collate(batch)
         langs = result[-1]
-        self.assertEqual(sorted(langs.tolist()), [0, 1, 2])
+        assert sorted(langs.tolist()) == [0, 1, 2]
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main(sys.argv)
