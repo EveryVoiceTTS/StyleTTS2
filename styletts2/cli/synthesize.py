@@ -258,16 +258,19 @@ def synthesize(
         )
         sys.exit(1)
 
-    import lightning as L
-    import torch
+    from everyvoice.utils import spinner
 
-    from .utils_heavy import (
-        StyleTTS2SynthesisDataModule,
-        build_filelist_entries,
-        build_text_entries,
-        get_styletts2_synthesis_output_callbacks,
-        get_styletts2_text_split_params,
-    )
+    with spinner():
+        import lightning as L
+        import torch
+
+        from .utils_heavy import (
+            StyleTTS2SynthesisDataModule,
+            build_filelist_entries,
+            build_text_entries,
+            get_styletts2_synthesis_output_callbacks,
+            get_styletts2_text_split_params,
+        )
 
     device = torch.device(
         "cuda"
@@ -283,6 +286,10 @@ def synthesize(
     model._mel_transform = mel_transform
 
     language = language or next(iter(model.lang2id.keys()), None)
+    if language is None:
+        raise typer.BadParameter(
+            "Cannot determine the default language, please provide the --language option."
+        )
 
     state = torch.load(model_path, map_location="cpu", weights_only=True)
     global_step = int(state.get("global_step", 0))
