@@ -1,31 +1,23 @@
-import os
-import shutil
-import sys
-from enum import Enum
-from pathlib import Path
 from typing import Annotated
 
 import typer
 from everyvoice.base_cli.interfaces import train_base_command_interface
 from merge_args import merge_args
 
-
-class Mode(str, Enum):
-    first = "first"
-    second = "second"
-    finetune = "finetune"
+from .. import core
+from ..core.train import TrainingMode
 
 
 @merge_args(train_base_command_interface)
 def train(
     mode: Annotated[
-        Mode,
+        TrainingMode,
         typer.Option(
             "-m",
             "--mode",
             help="Training mode: 'first' (acoustic pre-training with TMA), 'second' (joint diffusion+adversarial), or 'finetune'.",
         ),
-    ] = Mode.first,
+    ] = TrainingMode.first,
     precision: Annotated[
         str,
         typer.Option(
@@ -40,142 +32,8 @@ def train(
 
     **styletts2 train config/everyvoice-text-to-wav.yaml --mode first**
     """
-    from everyvoice.utils import spinner
-
-    with spinner():
-        import torch
-
-        if not torch.cuda.is_available():
-            # device="cuda" is assumed in multiple places, so let's just tell the user up front
-            # It's also pointless to try on CPU if it takes around a week on GPU...
-            sys.exit(
-                "ERROR: StyleTTS2 training requires a GPU with the cuda accellerator"
-            )
-
-        import lightning as L
-        from everyvoice.utils import update_config_from_cli_args
-        from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-        from lightning.pytorch.loggers import TensorBoardLogger
-        from lightning.pytorch.strategies import DDPStrategy
-
-        from ..ev_config import StyleTTS2Config
-        from ..ev_config.translation import to_native_config
-        from ..lightning import StyleTTS2, StyleTTS2DataModule
-
-    config_file: Path = kwargs["config_file"]
-    config_args: list[str] = kwargs.get("config_args", [])
-
-    ev_config = StyleTTS2Config.load_config_from_path(config_file)
-    update_config_from_cli_args(config_args, ev_config)
-
-    config = to_native_config(ev_config)
-
-    from everyvoice.text.lookups import lookuptables_from_config
-
-    lang2id, _ = lookuptables_from_config(ev_config)
-    if ev_config.model.multilingual and not lang2id:
-        sys.exit(
-            "ERROR: model.multilingual is true but no 'language' values were "
-            "found in your training/validation filelists."
-        )
-    config["lang2id"] = lang2id
-
-    tr = ev_config.training
-    max_epochs = (
-        tr.epochs_1st
-        if mode == Mode.first
-        else tr.epochs_2nd if mode == Mode.second else tr.max_epochs
+    ev_config = core.load_config(
+        config_file=kwargs["config_file"],  # don't pop this one, train() needs it
+        config_args=kwargs.pop("config_args"),
     )
-
-    log_dir = config["log_dir"]
-    os.makedirs(log_dir, exist_ok=True)
-    shutil.copy(str(config_file), os.path.join(log_dir, config_file.name))
-
-    # Stage 1 and stage 2 share the same log_dir; give each mode its own
-    # tensorboard sub-run so stage 2's restarted step/epoch counters don't
-    # get drawn as a continuation of stage 1's curve.
-    mode_sub_dirs = {
-        Mode.first: "stage-1",
-        Mode.second: "stage-2",
-        Mode.finetune: "finetune",
-    }
-    tb_logger = TensorBoardLogger(
-        save_dir=tr.logger.save_dir,
-        name=tr.logger.name,
-        version=tr.logger.version,
-        sub_dir=mode_sub_dirs[mode],
-    )
-
-    ckpt_dir = os.path.join(log_dir, "checkpoints")
-    ckpt_filename = f"epoch_{mode.value}_" + "{epoch:05d}"
-    # Always keep the last checkpoint regardless of performance.
-    last_ckpt_callback = ModelCheckpoint(
-        dirpath=ckpt_dir,
-        filename=ckpt_filename,
-        save_top_k=1,
-        save_last=True,
-        every_n_train_steps=tr.ckpt_steps,
-        every_n_epochs=tr.ckpt_epochs,
-        enable_version_counter=True,
-        save_on_train_epoch_end=True,
-    )
-    # Stage 1 and stage 2 share the same checkpoints dir; name the "last"
-    # checkpoint per-mode so stage 2 doesn't replace stage 1's checkpoint.
-    mode_ckpt_names = {
-        Mode.first: "stage-1-last",
-        Mode.second: "stage-2-last",
-        Mode.finetune: "finetune-last",
-    }
-    last_ckpt_callback.CHECKPOINT_NAME_LAST = mode_ckpt_names[mode]
-    # Keep only the top-k checkpoints ranked by val/mel (lower is better).
-    monitored_ckpt_callback = ModelCheckpoint(
-        dirpath=ckpt_dir,
-        filename=ckpt_filename,
-        monitor="val/mel",
-        mode="min",
-        save_top_k=tr.save_top_k_ckpts,
-        every_n_train_steps=tr.ckpt_steps,
-        every_n_epochs=tr.ckpt_epochs,
-        enable_version_counter=False,
-    )
-    lr_monitor = LearningRateMonitor(logging_interval="step")
-
-    devices = kwargs.get("devices", "auto")
-    strategy = kwargs.get("strategy", "ddp")
-
-    # GAN training uses separate discriminator/generator backward passes,
-    # so find_unused_parameters=True is required for DDP correctness.
-    try:
-        n_devices = int(devices)
-        multi_gpu = n_devices > 1
-    except (TypeError, ValueError):
-        multi_gpu = devices not in ("auto", "1", 1)
-
-    if strategy == "ddp" or (multi_gpu and strategy == "auto"):
-        resolved_strategy = DDPStrategy(find_unused_parameters=True)
-    else:
-        resolved_strategy = strategy
-
-    trainer = L.Trainer(
-        max_epochs=max_epochs,
-        devices=devices,
-        num_nodes=kwargs.get("nodes", 1),
-        accelerator=kwargs.get("accelerator", "auto"),
-        strategy=resolved_strategy,
-        precision=precision,
-        logger=tb_logger,
-        callbacks=[monitored_ckpt_callback, last_ckpt_callback, lr_monitor],
-        log_every_n_steps=config.get("log_interval", 10),
-        enable_progress_bar=True,
-    )
-
-    datamodule = StyleTTS2DataModule(config, load_for_everyvoice=True)
-    model = StyleTTS2(config, mode=mode.value)
-
-    resume_ckpt = (
-        str(tr.finetune_checkpoint)
-        if tr.finetune_checkpoint and os.path.exists(tr.finetune_checkpoint)
-        else None
-    )
-
-    trainer.fit(model, datamodule=datamodule, ckpt_path=resume_ckpt)
+    core.train(config=ev_config, mode=mode, precision=precision, **kwargs)
