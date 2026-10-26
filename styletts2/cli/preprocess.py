@@ -1,14 +1,19 @@
+import sys
 from enum import Enum
-from pathlib import Path
 
 import typer
 from everyvoice.base_cli.interfaces import preprocess_base_command_interface
+from everyvoice.exceptions import EveryVoiceError
+from loguru import logger
 from merge_args import merge_args
 
+from .. import core
 
-class PreprocessCategories(str, Enum):
-    audio = "audio"
-    text = "text"
+PreprocessCategories = Enum(  # type: ignore[misc]
+    "PreprocessCategories",
+    {category: category for category in core.PREPROCESS_CATEGORIES},
+    type=str,
+)
 
 
 @merge_args(preprocess_base_command_interface)
@@ -21,38 +26,17 @@ def preprocess(
     ),
     **kwargs,
 ):
-    """Preprocess audio and text data for StyleTTS2 training."""
-    from everyvoice.utils import spinner
+    """Preprocess data for text-to-wav (StyleTTS2) training
 
-    with spinner():
-        from everyvoice.base_cli.helpers import preprocess_base_command
-
-        from ..ev_config import StyleTTS2Config
-
-    preprocessor, config, _ = preprocess_base_command(
-        model_config=StyleTTS2Config,
-        steps=[step.name for step in steps],
-        **kwargs,
-    )
-
-    if not config.training.ood_raw_data:
-        return
-
-    resolved: dict[str, tuple[Path, object]] = {}
-    for lang, source in config.training.ood_raw_data.items():
-        if source.hf is not None:
-            from huggingface_hub import hf_hub_download
-
-            local_path = Path(
-                hf_hub_download(
-                    source.hf.repo_id,
-                    repo_type="dataset",
-                    filename=source.hf.filename,
-                    revision=source.hf.revision,
-                )
-            )
-        else:
-            local_path = source.local_path
-        resolved[lang] = (local_path, source.text_representation)
-
-    preprocessor.preprocess_ood(resolved)
+    **styletts2 preprocess config/everyvoice-text-to-wav.yaml**
+    """
+    try:
+        config = core.load_config(
+            config_file=kwargs.pop("config_file"), config_args=kwargs.pop("config_args")
+        )
+        core.preprocess(config, steps=[step.name for step in steps], **kwargs)
+    except typer.BadParameter as e:
+        raise e
+    except (EveryVoiceError, Exception) as e:
+        logger.error(f"{e.__class__.__name__}: {e}")
+        sys.exit(1)

@@ -11,7 +11,6 @@ from pathlib import Path
 
 import typer
 from everyvoice import logger
-from everyvoice.base_cli import command, default_typer_args
 from everyvoice.base_cli.interfaces import typer_file_option
 from everyvoice.config.type_definitions import (
     DatasetTextRepresentation,
@@ -120,14 +119,7 @@ def synthesize_one(
 # CLI command
 # ---------------------------------------------------------------------------
 
-app = typer.Typer(**default_typer_args)
 
-
-@command(
-    app,
-    name="text-to-wav",
-    short_help="Synthesize audio from text using a trained StyleTTS2 model",
-)
 def synthesize(
     model_path: Path = typer.Argument(
         ...,
@@ -239,13 +231,13 @@ def synthesize(
 
     Examples:
 
-    **everyvoice synthesize text-to-wav logs_and_checkpoints/.../stage-2-last.ckpt \\
+    **styletts2 synthesize logs_and_checkpoints/.../stage-2-last.ckpt \\
         --reference path/to/reference.wav \\
         --text "Hello world" --text "How are you?"**
 
     Or, for batch synthesis from a filelist:
 
-    **everyvoice synthesize text-to-wav logs_and_checkpoints/.../stage-2-last.ckpt \\
+    **styletts2 synthesize logs_and_checkpoints/.../stage-2-last.ckpt \\
         --reference path/to/reference.wav --filelist my_filelist.psv --simple-filenames**
     """
     # Do argument error checking before doing expensive imports
