@@ -1,7 +1,10 @@
+import sys
 from enum import Enum
 
 import typer
 from everyvoice.base_cli.interfaces import preprocess_base_command_interface
+from everyvoice.exceptions import EveryVoiceError
+from loguru import logger
 from merge_args import merge_args
 
 from .. import core
@@ -27,7 +30,13 @@ def preprocess(
 
     **styletts2 preprocess config/everyvoice-text-to-wav.yaml**
     """
-    config = core.load_config(
-        config_file=kwargs.pop("config_file"), config_args=kwargs.pop("config_args")
-    )
-    core.preprocess(config, steps=[step.name for step in steps], **kwargs)
+    try:
+        config = core.load_config(
+            config_file=kwargs.pop("config_file"), config_args=kwargs.pop("config_args")
+        )
+        core.preprocess(config, steps=[step.name for step in steps], **kwargs)
+    except typer.BadParameter as e:
+        raise e
+    except (EveryVoiceError, Exception) as e:
+        logger.error(f"{e.__class__.__name__}: {e}")
+        sys.exit(1)
