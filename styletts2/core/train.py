@@ -5,8 +5,6 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
-
 if TYPE_CHECKING:
     from ..ev_config import StyleTTS2Config
 
@@ -40,6 +38,7 @@ def train(
             )
 
         import lightning as L
+        from everyvoice.base_cli.helpers import save_configuration_to_log_dir
         from everyvoice.text.lookups import lookuptables_from_config
         from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
         from lightning.pytorch.loggers import TensorBoardLogger
@@ -69,17 +68,10 @@ def train(
     log_dir = native_config["log_dir"]
     os.makedirs(log_dir, exist_ok=True)
     if config_file is not None:
-        config_file_s = str(config_file)
-        shutil.copy(config_file_s, os.path.join(log_dir, config_file_s))
+        shutil.copy(str(config_file), os.path.join(log_dir, Path(config_file).name))
     # Log the full in-memory config object as really used, including any
     # --config-args overrides on the CLI or programmatic changes to config
-    with open(
-        os.path.join(log_dir, "effective-text-to-wav-config.yaml"),
-        mode="w",
-        encoding="utf-8",
-    ) as f:
-        config_dict = ev_config.model_dump()
-        yaml.dump(config_dict, f, default_flow_style=None, allow_unicode=True)
+    save_configuration_to_log_dir(ev_config)
 
     # Stage 1 and stage 2 share the same log_dir; give each mode its own
     # tensorboard sub-run so stage 2's restarted step/epoch counters don't
