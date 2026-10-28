@@ -109,7 +109,7 @@ def train(
 
     ckpt_dir = os.path.join(log_dir, "checkpoints")
     job_ckpt_dir = slurm_job_ckpt_dir(ckpt_dir)
-    # Include the step so a mid-epoch save (e.g. on exception) never
+    # Include the step so a mid-epoch save (every_n_train_steps) never
     # overwrites the checkpoint saved at the end of the previous epoch.
     ckpt_filename = f"epoch_{mode.value}_" + "{epoch:05d}-{step}"
     # Always keep the last checkpoint regardless of performance.
@@ -118,7 +118,6 @@ def train(
         filename=ckpt_filename,
         save_top_k=1,
         save_last=True,
-        save_on_exception=True,
         every_n_train_steps=tr.ckpt_steps,
         every_n_epochs=tr.ckpt_epochs,
         enable_version_counter=True,
