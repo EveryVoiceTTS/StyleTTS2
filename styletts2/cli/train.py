@@ -48,6 +48,12 @@ def train(
             )
 
         import lightning as L
+        from everyvoice import logger
+        from everyvoice.base_cli.slurm import (
+            latest_hpc_ckpt,
+            name_hpc_ckpts_by_step,
+            slurm_job_ckpt_dir,
+        )
         from everyvoice.utils import update_config_from_cli_args
         from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
         from lightning.pytorch.loggers import TensorBoardLogger
@@ -102,7 +108,10 @@ def train(
     )
 
     ckpt_dir = os.path.join(log_dir, "checkpoints")
-    ckpt_filename = f"epoch_{mode.value}_" + "{epoch:05d}"
+    job_ckpt_dir = slurm_job_ckpt_dir(ckpt_dir)
+    # Include the step so a mid-epoch save (every_n_train_steps) never
+    # overwrites the checkpoint saved at the end of the previous epoch.
+    ckpt_filename = f"epoch_{mode.value}_" + "{epoch:05d}-{step}"
     # Always keep the last checkpoint regardless of performance.
     last_ckpt_callback = ModelCheckpoint(
         dirpath=ckpt_dir,
@@ -162,7 +171,10 @@ def train(
         callbacks=[monitored_ckpt_callback, last_ckpt_callback, lr_monitor],
         log_every_n_steps=config.get("log_interval", 10),
         enable_progress_bar=True,
+        # Lightning saves its Slurm requeue checkpoints in default_root_dir
+        default_root_dir=job_ckpt_dir,
     )
+    name_hpc_ckpts_by_step(trainer)
 
     datamodule = StyleTTS2DataModule(config, load_for_everyvoice=True)
     model = StyleTTS2(config, mode=mode.value)
@@ -172,5 +184,13 @@ def train(
         if tr.finetune_checkpoint and os.path.exists(tr.finetune_checkpoint)
         else None
     )
+
+    # A checkpoint saved just before a SLURM requeue/preemption (via SIGUSR1)
+    # takes priority over finetune_checkpoint, so a requeued job resumes the
+    # progress made this run instead of restarting from the finetune source.
+    if (hpc_ckpt := latest_hpc_ckpt(job_ckpt_dir)) is not None:
+        logger.info(f"Resuming requeued Slurm job from {hpc_ckpt}")
+        trainer.fit(model, datamodule=datamodule, ckpt_path=hpc_ckpt)
+        return
 
     trainer.fit(model, datamodule=datamodule, ckpt_path=resume_ckpt)
