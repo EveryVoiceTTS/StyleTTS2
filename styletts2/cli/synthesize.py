@@ -155,6 +155,7 @@ def synthesize(
     text_representation: DatasetTextRepresentation = typer.Option(
         DatasetTextRepresentation.characters,
         "--text-representation",
+        metavar="<repr.>",
         help="The representation of the text passed via --text: 'characters' or"
         " 'phones' (already-phonemized IPA). The input type must be compatible"
         " with your model. Only applies to --text; --filelist rows determine"
@@ -182,7 +183,9 @@ def synthesize(
     output_type: list[SynthesizeOutputFormats] = typer.Option(
         [SynthesizeOutputFormats.wav],
         "--output-type",
-        help="Output format(s) to produce.",
+        metavar="<format>",
+        help="Output format(s) to produce. One of: wav",
+        # + ", ".join(format.value for format in SynthesizeOutputFormats),
     ),
     simple_filenames: bool = typer.Option(
         False,
