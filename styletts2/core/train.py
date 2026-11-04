@@ -5,6 +5,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from everyvoice.exceptions import DependencyError
+
 if TYPE_CHECKING:
     from ..ev_config import StyleTTS2Config
 
@@ -33,7 +35,7 @@ def train(
         if not torch.cuda.is_available():
             # device="cuda" is assumed in multiple places, so let's just tell the user up front
             # It's also pointless to try on CPU if it takes around a week on GPU...
-            sys.exit(
+            raise DependencyError(
                 "ERROR: StyleTTS2 training requires a GPU with the cuda accellerator"
             )
 
