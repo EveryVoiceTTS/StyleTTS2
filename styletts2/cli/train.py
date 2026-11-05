@@ -1,7 +1,9 @@
+import sys
 from typing import Annotated
 
 import typer
 from everyvoice.base_cli.interfaces import train_base_command_interface
+from loguru import logger
 from merge_args import merge_args
 
 from .. import core
@@ -32,8 +34,17 @@ def train(
 
     **styletts2 train config/everyvoice-text-to-wav.yaml --mode first**
     """
-    ev_config = core.load_config(
-        config_file=kwargs["config_file"],  # don't pop this one, train() needs it
-        config_args=kwargs.pop("config_args"),
-    )
-    core.train(config=ev_config, mode=mode, precision=precision, **kwargs)
+    debug = kwargs.pop("debug")
+    try:
+        ev_config = core.load_config(
+            config_file=kwargs["config_file"],  # don't pop this one, train() needs it
+            config_args=kwargs.pop("config_args"),
+        )
+        core.train(config=ev_config, mode=mode, precision=precision, **kwargs)
+    except Exception as e:
+        logger.error(f"{e.__class__.__name__}: {e}")
+        if debug:
+            raise e
+        else:
+            logger.info("Rerun with --debug to see the full stack trace.")
+            sys.exit(1)
