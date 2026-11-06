@@ -12,7 +12,7 @@ def fetch_pretrained(
         file_okay=True,
     ),
 ):
-    """Download StyleTTS2 pretrained model weights from HuggingFace.
+    """Download StyleTTS2 pretrained model weights from HuggingFace
 
     Run this command on a node with internet access before submitting a GPU
     training job.  The files are stored in the HuggingFace hub cache and are
