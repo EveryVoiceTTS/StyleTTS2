@@ -39,14 +39,14 @@ classifiers = [
   "Typing :: Typed",
 ]
 requires-python = ">=3.10, <3.13"
-dependencies = [
-  "everyvoice==0.5.0",
-]
+
+dependencies = ["everyvoice==0.5.0"]
 
 [project.optional-dependencies]
-dev = [
-  "everyvoice[dev]",
-]
+dev = ["everyvoice[dev]"]
+
+[dependency-groups]
+dev = ["everyvoice[dev]"]
 
 [project.scripts]
 styletts2 = "styletts2.cli:app"
