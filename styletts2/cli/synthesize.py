@@ -172,7 +172,7 @@ def synthesize(
         " other metadata, e.g. 'LJ050-0269--LJ--eng--ckpt=100000--pred.wav'."
         " Use --simple-filenames to write just 'LJ050-0269.wav' instead.",
     ),
-    output_type: list[SynthesizeOutputFormats] = typer.Option(
+    output_types: list[SynthesizeOutputFormats] = typer.Option(
         [SynthesizeOutputFormats.wav],
         "--output-type",
         metavar="<format>",
@@ -331,7 +331,7 @@ def synthesize(
         sys.exit(1)
 
     callbacks = get_styletts2_synthesis_output_callbacks(
-        output_type,
+        output_types,
         output_dir,
         global_step,
         model.sr,
