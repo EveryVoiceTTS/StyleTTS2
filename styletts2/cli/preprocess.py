@@ -1,31 +1,25 @@
 import sys
-from enum import Enum
 from typing import Annotated
 
 import typer
+from everyvoice.base_cli import make_enum
 from everyvoice.base_cli.interfaces import preprocess_base_command_interface
 from loguru import logger
 from merge_args import merge_args
 
 from .. import core
 
-PreprocessCategories = Enum(  # type: ignore[misc]
-    "PreprocessCategories",
-    {category: category for category in core.PREPROCESS_CATEGORIES},
-    type=str,
-)
-
 
 @merge_args(preprocess_base_command_interface)
 def preprocess(
     steps: Annotated[
-        list[PreprocessCategories],
+        list[make_enum(core.PREPROCESS_CATEGORIES)],  # type: ignore[valid-type]
         typer.Option(
             "-s",
             "--steps",
             help="Which preprocessing steps to run. If none are provided, text and audio processing steps are performed.",
         ),
-    ] = [cat.value for cat in PreprocessCategories],
+    ] = core.PREPROCESS_CATEGORIES,
     **kwargs,
 ):
     """Preprocess data for text-to-wav (StyleTTS2) training
