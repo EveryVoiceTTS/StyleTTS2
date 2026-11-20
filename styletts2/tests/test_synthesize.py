@@ -159,7 +159,7 @@ def test_build_filelist_entries_no_chunking_by_default():
 
 class TestStyleTTS2PredictionWritingWavCallback:
     """Tests the accumulate-then-flush-on-last-chunk behaviour, mirroring
-    FastSpeech2's chunk reassembly (fs2/tests/test_writing_callbacks.py)."""
+    FastSpeech2's chunk reassembly (fs2/tests/test_chunking.py)."""
 
     def test_flushes_only_on_last_chunk(self, tmp_path):
         import numpy as np
