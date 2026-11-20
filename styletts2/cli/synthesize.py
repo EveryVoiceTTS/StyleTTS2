@@ -245,21 +245,16 @@ def synthesize(
     """
     # Do argument error checking before doing expensive imports
     if text and filelist:
-        print(
+        raise typer.BadParameter(
             "Got arguments for both --text and --filelist."
-            " You can only synthesize using one of these options",
-            file=sys.stderr,
+            " You can only synthesize using one of these options"
         )
-        sys.exit(1)
     if not text and not filelist:
-        print("You must define either --text or --filelist", file=sys.stderr)
-        sys.exit(1)
+        raise typer.BadParameter("You must define either --text or --filelist")
     if text and reference is None:
-        print(
-            "Missing --reference option, which is required when using --text.",
-            file=sys.stderr,
+        raise typer.BadParameter(
+            "Missing --reference option, which is required when using --text."
         )
-        sys.exit(1)
 
     import lightning as L
     import torch
