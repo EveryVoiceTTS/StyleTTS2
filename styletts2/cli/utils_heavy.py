@@ -232,7 +232,7 @@ class StyleTTS2PredictionWritingWavCallback(BasePredictionWritingCallback):
 
 
 def get_styletts2_synthesis_output_callbacks(
-    output_type: Sequence[SynthesizeOutputFormats],
+    output_types: Sequence[SynthesizeOutputFormats],
     output_dir: Path,
     global_step: int,
     sample_rate: int,
@@ -240,7 +240,7 @@ def get_styletts2_synthesis_output_callbacks(
 ) -> dict[SynthesizeOutputFormats, BasePredictionWritingCallback]:
     """Build the set of synthesis callbacks for the requested output formats. Only supports wav for now."""
     callbacks: dict[SynthesizeOutputFormats, BasePredictionWritingCallback] = {}
-    if SynthesizeOutputFormats.wav in output_type:
+    if SynthesizeOutputFormats.wav in output_types:
         callbacks[SynthesizeOutputFormats.wav] = StyleTTS2PredictionWritingWavCallback(
             output_dir, global_step, simple_filenames=simple_filenames
         )
