@@ -429,7 +429,7 @@ class StyleTTS2(L.LightningModule):
             from .ev_config import StyleTTS2Config
 
             raw_config = dict(raw_config)
-            raw_config["ev_config"] = StyleTTS2Config.model_validate(
+            raw_config["ev_config"] = StyleTTS2Config.from_checkpoint_dump(
                 raw_config["ev_config"]
             )
 
