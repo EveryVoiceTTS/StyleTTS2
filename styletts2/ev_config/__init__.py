@@ -659,6 +659,30 @@ class StyleTTS2Config(BaseModelWithContact):
             )
         return data
 
+    def model_checkpoint_dump(self):
+        """Dump this config for a checkpoint, without any paths: see
+        ConfigModel.model_checkpoint_dump().
+
+        Two kinds of paths are not removed by their declared type, so they are
+        handled here:
+          - an ood_raw_data source with a local_path would be left with neither
+            local_path nor hf, which fails validation, so local sources are
+            removed and only the hf ones are kept;
+          - first_stage_path is a str holding a path, so it is removed too.
+        Nothing reads them from a config loaded from a checkpoint: training
+        gets them from its own config.
+        """
+        dumped = super().model_checkpoint_dump()
+        training = dumped.get("training", {})
+        training.pop("first_stage_path", None)
+        if "ood_raw_data" in training:
+            training["ood_raw_data"] = {
+                lang: source
+                for lang, source in training["ood_raw_data"].items()
+                if source.get("hf") is not None
+            }
+        return dumped
+
     @staticmethod
     def load_config_from_path(path: Path) -> "StyleTTS2Config":
         config = load_config_from_json_or_yaml_path(path)

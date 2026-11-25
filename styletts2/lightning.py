@@ -453,16 +453,25 @@ class StyleTTS2(L.LightningModule):
     def _config_to_checkpoint_safe(config: dict) -> dict:
         """Recursively convert a native config dict to a JSON-safe representation.
 
-        Pydantic models are serialized via model_dump(mode='json'), which
-        converts Enums to their values and Paths to strings.  The result is then
-        recursed to catch any remaining non-primitive types.  Plain Path and Enum
-        values that appear outside pydantic models are also converted.  The result
+        EveryVoice configs (ev_config) are serialized via model_checkpoint_dump(),
+        which removes all their paths, as for FastSpeech2 and HiFiGAN checkpoints:
+        loading a checkpoint validates its config, and validating a directory path
+        that doesn't exist creates it.  Other pydantic models are serialized via
+        model_dump(mode='json').  The result is then recursed to convert the
+        remaining non-primitive types: Enums to their values, and Paths to
+        strings.  The paths in the native config, e.g., pretrained_asr's
+        local_config, are kept as strings: they are not validated on load, and
+        building the model from a checkpoint needs some of them.  The result
         contains only built-in Python types, so torch.load(weights_only=True) can
         deserialise it.
         """
         import enum
         from pathlib import Path
 
+        from everyvoice.config.shared_types import ConfigModel
+
+        if isinstance(config, ConfigModel):
+            return StyleTTS2._config_to_checkpoint_safe(config.model_checkpoint_dump())
         if hasattr(config, "model_dump"):
             return StyleTTS2._config_to_checkpoint_safe(config.model_dump(mode="json"))
         if isinstance(config, dict):
