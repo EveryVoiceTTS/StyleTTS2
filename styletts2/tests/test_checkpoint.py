@@ -38,11 +38,11 @@ class TestCheckpointConfig:
         from styletts2.ev_config import StyleTTS2Config
 
         file = tmp_path / "file.txt"
-        file.write_text("x\n")
+        file.write_text("x\n", encoding="utf8")
         directory = tmp_path / "dir"
         directory.mkdir()
         text_config = tmp_path / "text.json"
-        text_config.write_text(TextConfig().model_dump_json())
+        text_config.write_text(TextConfig().model_dump_json(), encoding="utf8")
         f, d = str(file), str(directory)
         return StyleTTS2Config(
             contact=TEST_CONTACT,
