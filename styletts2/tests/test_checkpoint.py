@@ -139,3 +139,86 @@ class TestCheckpointConfig:
         )
         assert loaded.model_dump() == config.model_dump()
         assert list(tmp_path.iterdir()) == []
+
+
+def build_model(mode="second", **native_overrides):
+    """Build a StyleTTS2 module on CPU, without downloading pretrained weights,
+    and run setup("fit") the way Lightning does before restoring a checkpoint."""
+    from unittest import mock
+
+    from styletts2.ev_config import StyleTTS2Config
+    from styletts2.ev_config.translation import to_native_config
+    from styletts2.lightning import StyleTTS2
+
+    config = to_native_config(StyleTTS2Config(contact=TEST_CONTACT))
+    # Skip the stage 1 load in setup()
+    config["pretrained_model"] = "unused"
+    for key, value in native_overrides.items():
+        config[key] = {**config[key], **value} if isinstance(value, dict) else value
+
+    initialize = StyleTTS2.initialize_from_config
+
+    def initialize_without_downloads(self, config, load_pretrained_weights=True):
+        initialize(self, config, load_pretrained_weights=False)
+
+    with mock.patch.object(
+        StyleTTS2, "initialize_from_config", initialize_without_downloads
+    ):
+        model = StyleTTS2(config, mode=mode)
+    model.setup("fit")
+    return model
+
+
+def saved_checkpoint(model, sigma_data=None) -> dict:
+    """Save model the way training does, optionally with an estimated sigma_data."""
+    if sigma_data is not None:
+        model.config["model_params"]["diffusion"]["dist"]["sigma_data"] = sigma_data
+    checkpoint: dict = {"state_dict": model.state_dict()}
+    model.on_save_checkpoint(checkpoint)
+    buffer = io.BytesIO()
+    torch.save(checkpoint, buffer)
+    buffer.seek(0)
+    return torch.load(buffer, weights_only=True)
+
+
+class TestResumeFromCheckpoint:
+    """on_load_checkpoint on a module built from a config, i.e. when training
+    continues a checkpoint's full training state."""
+
+    def test_keeps_live_module(self):
+        checkpoint = saved_checkpoint(build_model(), sigma_data=0.42)
+        model = build_model(max_len=123, loss_params={"lambda_mel": 7.0})
+        slmadv = model._slmadv
+        frozen = [p.requires_grad for p in model.text_encoder.parameters()]
+        model.on_load_checkpoint(checkpoint)
+        assert model._slmadv is slmadv
+        assert model.mode == "second"
+        assert model.max_len == 123
+        assert model.config["loss_params"]["lambda_mel"] == 7.0
+        assert [p.requires_grad for p in model.text_encoder.parameters()] == frozen
+        assert model.diffusion.diffusion.sigma_data == 0.42
+        assert model.config["model_params"]["diffusion"]["dist"]["sigma_data"] == 0.42
+
+    def test_changed_optimizer_raises(self):
+        checkpoint = saved_checkpoint(build_model())
+        model = build_model(optimizer_params={"lr": 5e-6})
+        with pytest.raises(ValueError, match="optimizer_params"):
+            model.on_load_checkpoint(checkpoint)
+
+    def test_other_mode_raises(self):
+        checkpoint = saved_checkpoint(build_model(mode="second"))
+        model = build_model(mode="finetune")
+        with pytest.raises(ValueError, match="--mode second"):
+            model.on_load_checkpoint(checkpoint)
+
+    def test_empty_module_loads_checkpoint_config(self):
+        """Synthesis builds an empty module from the checkpoint."""
+        from styletts2.lightning import StyleTTS2
+
+        checkpoint = saved_checkpoint(build_model(max_len=123), sigma_data=0.42)
+        model = StyleTTS2()
+        model.on_load_checkpoint(checkpoint)
+        model.load_state_dict(checkpoint["state_dict"])
+        assert model.mode == "second"
+        assert model.max_len == 123
+        assert model.diffusion.diffusion.sigma_data == 0.42
