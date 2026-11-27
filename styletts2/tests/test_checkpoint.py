@@ -141,7 +141,7 @@ class TestCheckpointConfig:
         assert list(tmp_path.iterdir()) == []
 
 
-def build_model(mode="second", **native_overrides):
+def build_model(mode="second", restore_full_state=True, **native_overrides):
     """Build a StyleTTS2 module on CPU, without downloading pretrained weights,
     and run setup("fit") the way Lightning does before restoring a checkpoint."""
     from unittest import mock
@@ -151,8 +151,6 @@ def build_model(mode="second", **native_overrides):
     from styletts2.lightning import StyleTTS2
 
     config = to_native_config(StyleTTS2Config(contact=TEST_CONTACT))
-    # Skip the stage 1 load in setup()
-    config["pretrained_model"] = "unused"
     for key, value in native_overrides.items():
         config[key] = {**config[key], **value} if isinstance(value, dict) else value
 
@@ -164,7 +162,8 @@ def build_model(mode="second", **native_overrides):
     with mock.patch.object(
         StyleTTS2, "initialize_from_config", initialize_without_downloads
     ):
-        model = StyleTTS2(config, mode=mode)
+        # restore_full_state skips the stage 1 load in setup()
+        model = StyleTTS2(config, mode=mode, restore_full_state=restore_full_state)
     model.setup("fit")
     return model
 
@@ -222,3 +221,40 @@ class TestResumeFromCheckpoint:
         assert model.mode == "second"
         assert model.max_len == 123
         assert model.diffusion.diffusion.sigma_data == 0.42
+
+
+class TestWeightsOnlyFinetune:
+    """setup() with training.finetune_checkpoint (pretrained_model) and
+    training.finetune_mode: weights-only, the default."""
+
+    def test_loads_weights_and_sigma_data(self, tmp_path):
+        source = build_model()
+        path = tmp_path / "source.ckpt"
+        torch.save(saved_checkpoint(source, sigma_data=0.42), path)
+        model = build_model(
+            mode="finetune", restore_full_state=False, pretrained_model=str(path)
+        )
+        for name, value in source.decoder.state_dict().items():
+            assert torch.equal(model.decoder.state_dict()[name], value), name
+        assert model.diffusion.diffusion.sigma_data == 0.42
+        assert model.config["model_params"]["diffusion"]["dist"]["sigma_data"] == 0.42
+        assert model.mode == "finetune"
+        assert model._slmadv is not None
+
+    def test_upstream_checkpoint_raises(self, tmp_path):
+        """Checkpoints from the original StyleTTS2 code have no Lightning state_dict."""
+        path = tmp_path / "epoch_2nd_00100.pth"
+        torch.save({"net": {}, "epoch": 100}, path)
+        with pytest.raises(
+            ValueError, match="isn't an EveryVoice StyleTTS2 checkpoint"
+        ):
+            build_model(restore_full_state=False, pretrained_model=str(path))
+
+    def test_deprecated_load_options_warn(self):
+        from everyvoice.tests.stubs import capture_logs, flatten_log
+
+        from styletts2.ev_config import StyleTTS2TrainingConfig
+
+        with capture_logs() as logs:
+            StyleTTS2TrainingConfig(load_only_params=True)
+        assert "deprecated" in flatten_log("".join(logs))

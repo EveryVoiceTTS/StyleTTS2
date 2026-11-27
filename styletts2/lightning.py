@@ -216,17 +216,26 @@ class StyleTTS2(L.LightningModule):
     Args:
         config: parsed YAML config dict.
         mode: one of ``'first'``, ``'second'``, or ``'finetune'``.
+        restore_full_state: True when trainer.fit() restores the full training
+            state from a checkpoint (ckpt_path), so setup() doesn't load the
+            starting weights (pretrained_model or first_stage_path).
     """
 
     _VERSION: str = "1.1"
 
-    def __init__(self, config: dict | None = None, mode: str = "first"):
+    def __init__(
+        self,
+        config: dict | None = None,
+        mode: str = "first",
+        restore_full_state: bool = False,
+    ):
         super().__init__()
 
         assert mode in ("first", "second", "finetune"), f"Unknown mode: {mode}"
         self.automatic_optimization = False
         self.config = config
         self.mode = mode
+        self.restore_full_state = restore_full_state
 
         # If loading from a checkpoint, we have to first load an empty config, and then initialize in on_load_checkpoint
         if self.config is not None:
@@ -327,10 +336,21 @@ class StyleTTS2(L.LightningModule):
             sig=getattr(p, "sig", 1.5),
         )
 
+        if not self.restore_full_state:
+            self._load_starting_weights()
+
+        self._freeze_for_mode()
+
+    def _load_starting_weights(self):
+        """Load the weights this run starts from, without any training state:
+        pretrained_model (training.finetune_checkpoint) if it is set, otherwise
+        the Stage 1 weights for Stage 2 / finetune."""
+        assert self.config is not None
+        pretrained_model = self.config.get("pretrained_model", "")
+        if pretrained_model:
+            self._load_pretrained_model(pretrained_model)
         # Stage 2 / finetune: load Stage 1 weights (weights only, not optimizer state)
-        if self.mode in ("second", "finetune") and not self.config.get(
-            "pretrained_model", ""
-        ):
+        elif self.mode in ("second", "finetune"):
             first_stage_path = self.config.get("first_stage_path", "")
             if first_stage_path and not os.path.isabs(first_stage_path):
                 first_stage_path = os.path.join(
@@ -352,18 +372,7 @@ class StyleTTS2(L.LightningModule):
                 )
                 if "state_dict" in state:
                     # Lightning checkpoint: extract per-submodule state dicts
-                    for key in self._net_keys:
-                        if key in _ignore:
-                            continue
-                        prefix = key + "."
-                        sub_sd = {
-                            k[len(prefix) :]: v
-                            for k, v in state["state_dict"].items()
-                            if k.startswith(prefix)
-                        }
-                        if sub_sd:
-                            getattr(self, key).load_state_dict(sub_sd, strict=False)
-                            print(f"{key} loaded")
+                    self._load_net_state_dicts(state["state_dict"], ignore=_ignore)
                 else:
                     # Legacy format (original train_first.py checkpoints)
                     load_checkpoint(
@@ -384,7 +393,45 @@ class StyleTTS2(L.LightningModule):
                     "Set pretrained_model in config to load a Stage 2 checkpoint directly."
                 )
 
-        self._freeze_for_mode()
+    def _load_net_state_dicts(self, state_dict: dict, ignore=()) -> None:
+        """Load each sub-network's weights from a Lightning checkpoint's state_dict."""
+        for key in self._net_keys:
+            if key in ignore:
+                continue
+            prefix = key + "."
+            sub_sd = {
+                k[len(prefix) :]: v
+                for k, v in state_dict.items()
+                if k.startswith(prefix)
+            }
+            if sub_sd:
+                getattr(self, key).load_state_dict(sub_sd, strict=False)
+                print(f"{key} loaded")
+
+    def _load_pretrained_model(self, path: str) -> None:
+        """Load the weights of the EveryVoice StyleTTS2 checkpoint at path, and
+        the sigma_data its training estimated, without its training state."""
+        state = torch.load(path, map_location="cpu", weights_only=True, mmap=True)
+        if not (
+            isinstance(state, dict)
+            and "state_dict" in state
+            and "config" in state.get("hyper_parameters", {})
+        ):
+            raise ValueError(
+                f"'{path}' isn't an EveryVoice StyleTTS2 checkpoint: it has no "
+                "'state_dict' and 'hyper_parameters' config. Checkpoints from the "
+                "original StyleTTS2 code need to be converted first."
+            )
+        self._load_net_state_dicts(state["state_dict"])
+        sigma_data = (
+            state["hyper_parameters"]["config"]
+            .get("model_params", {})
+            .get("diffusion", {})
+            .get("dist", {})
+            .get("sigma_data")
+        )
+        if sigma_data is not None:
+            self._set_sigma_data(sigma_data)
 
     def _freeze_for_mode(self):
         """Freeze parameters never trained in this mode.
@@ -485,7 +532,8 @@ class StyleTTS2(L.LightningModule):
                 f"This checkpoint was saved by '--mode {ckpt_mode}' training, so continuing "
                 f"it needs '--mode {ckpt_mode}', not '--mode {self.mode}'. To start "
                 f"'--mode {self.mode}' training from its weights, set "
-                "training.finetune_checkpoint in a new experiment instead."
+                "training.finetune_checkpoint in a new experiment, with "
+                "training.finetune_mode: weights-only (the default)."
             )
         assert self.config is not None
 
@@ -520,7 +568,8 @@ class StyleTTS2(L.LightningModule):
                 f"continues from a checkpoint's full training state:\n{details}\n"
                 "The checkpoint's optimizer and learning rate schedule are restored as "
                 "they are. Either revert these settings, or start a new experiment with "
-                "training.finetune_checkpoint set to this checkpoint to load only its weights."
+                "training.finetune_checkpoint set to this checkpoint and "
+                "training.finetune_mode: weights-only (the default) to load only its weights."
             )
 
     @staticmethod
