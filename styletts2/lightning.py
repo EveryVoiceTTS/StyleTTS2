@@ -394,9 +394,8 @@ class StyleTTS2(L.LightningModule):
         overhead of find_unused_parameters=True.
 
         Must be re-run any time the sub-networks are rebuilt (e.g. by
-        on_load_checkpoint(), which reconstructs them via
-        initialize_from_config() and would otherwise silently undo the
-        freezing applied here from setup()).
+        on_load_checkpoint() on an empty module, which builds them via
+        initialize_from_config()).
         """
         if self.mode == "first":
             for key in (
@@ -415,29 +414,44 @@ class StyleTTS2(L.LightningModule):
                 net.requires_grad_(False)
 
     def on_load_checkpoint(self, checkpoint):
-        """Deserialize the checkpoint hyperparameters."""
+        """Deserialize the checkpoint hyperparameters.
+
+        A module created empty (StyleTTS2(), e.g. for synthesis) is built from
+        the checkpoint's config and mode. A module built from a config is
+        resuming training: it keeps its config, mode and sub-networks as
+        setup() left them, and takes only the estimated sigma_data from the
+        checkpoint.
+        """
         checkpoint = self.check_and_upgrade_checkpoint(checkpoint)
 
         hp = checkpoint.get("hyper_parameters", {})
         raw_config = hp["config"]
 
-        # New checkpoints store ev_config as a JSON-safe dict (via
-        # model_checkpoint_dump).  Old checkpoints stored the pydantic object
-        # directly.  Reconstruct when necessary so the rest of the code always
-        # gets a StyleTTS2Config instance.
-        if isinstance(raw_config.get("ev_config"), dict):
-            from .ev_config import StyleTTS2Config
+        if self.config is None:
+            # New checkpoints store ev_config as a JSON-safe dict (via
+            # model_checkpoint_dump).  Old checkpoints stored the pydantic object
+            # directly.  Reconstruct when necessary so the rest of the code always
+            # gets a StyleTTS2Config instance.
+            if isinstance(raw_config.get("ev_config"), dict):
+                from .ev_config import StyleTTS2Config
 
-            raw_config = dict(raw_config)
-            raw_config["ev_config"] = StyleTTS2Config.from_checkpoint_dump(
-                raw_config["ev_config"]
+                raw_config = dict(raw_config)
+                raw_config["ev_config"] = StyleTTS2Config.from_checkpoint_dump(
+                    raw_config["ev_config"]
+                )
+
+            self.config = raw_config
+            self.mode = hp.get("mode", self.mode)
+
+            self.initialize_from_config(self.config, load_pretrained_weights=False)
+            self._freeze_for_mode()
+        else:
+            self._check_resume_compatible(raw_config, hp.get("mode"))
+            sigma_data = raw_config["model_params"]["diffusion"]["dist"].get(
+                "sigma_data"
             )
-
-        self.config = raw_config
-        self.mode = hp.get("mode", self.mode)
-
-        self.initialize_from_config(self.config, load_pretrained_weights=False)
-        self._freeze_for_mode()
+            if sigma_data is not None:
+                self._set_sigma_data(sigma_data)
 
         # Older checkpoints may have WavLM weights (wl.wavlm.*).  Drop them
         # before Lightning applies the state dict — they are unused at synthesis
@@ -448,6 +462,66 @@ class StyleTTS2(L.LightningModule):
             for k, v in checkpoint["state_dict"].items()
             if not k.startswith("wl.wavlm.")
         }
+
+    def _set_sigma_data(self, sigma_data: float) -> None:
+        """Use sigma_data, e.g. estimated by an earlier run, for the diffusion model."""
+        assert self.config is not None
+        self.config["model_params"]["diffusion"]["dist"]["sigma_data"] = float(
+            sigma_data
+        )
+        self.diffusion.diffusion.sigma_data = float(sigma_data)
+
+    def _check_resume_compatible(self, ckpt_config: dict, ckpt_mode: str | None):
+        """Raise if this module can't continue the full training state of a
+        checkpoint saved with ckpt_config and ckpt_mode.
+
+        A full restore loads the checkpoint's optimizer and scheduler state over
+        the optimizers configure_optimizers() builds, so optimizer changes would
+        be silently ignored. The mode and the architecture decide which
+        parameters are trained, so changing them makes the restore fail.
+        """
+        if ckpt_mode is not None and ckpt_mode != self.mode:
+            raise ValueError(
+                f"This checkpoint was saved by '--mode {ckpt_mode}' training, so continuing "
+                f"it needs '--mode {ckpt_mode}', not '--mode {self.mode}'. To start "
+                f"'--mode {self.mode}' training from its weights, set "
+                "training.finetune_checkpoint in a new experiment instead."
+            )
+        assert self.config is not None
+
+        def without_sigma_data(model_params: dict) -> dict:
+            model_params = copy.deepcopy(model_params)
+            model_params.get("diffusion", {}).get("dist", {}).pop("sigma_data", None)
+            return model_params
+
+        sections = {
+            "optimizer_params": (
+                ckpt_config.get("optimizer_params", {}),
+                self.config.get("optimizer_params", {}),
+            ),
+            "model_params": (
+                without_sigma_data(ckpt_config.get("model_params", {})),
+                without_sigma_data(self.config.get("model_params", {})),
+            ),
+        }
+        changed = [
+            name
+            for name, (ckpt_section, live_section) in sections.items()
+            if self._config_to_checkpoint_safe(ckpt_section)
+            != self._config_to_checkpoint_safe(live_section)
+        ]
+        if changed:
+            details = "\n".join(
+                f"  {name}: checkpoint {sections[name][0]!r}, config {sections[name][1]!r}"
+                for name in changed
+            )
+            raise ValueError(
+                "Your configuration changes settings that can't change when training "
+                f"continues from a checkpoint's full training state:\n{details}\n"
+                "The checkpoint's optimizer and learning rate schedule are restored as "
+                "they are. Either revert these settings, or start a new experiment with "
+                "training.finetune_checkpoint set to this checkpoint to load only its weights."
+            )
 
     @staticmethod
     def _config_to_checkpoint_safe(config: dict) -> dict:
@@ -1238,6 +1312,11 @@ class StyleTTS2(L.LightningModule):
 
         # -- SLM adversarial pass (joint epoch / finetune) ---------------
         d_loss_slm = loss_gen_lm = 0.0
+        if (epoch >= self.joint_epoch or is_ft) and self._slmadv is None:
+            raise RuntimeError(
+                "The SLM adversarial loss is not set up: setup('fit') must run "
+                "before training, and nothing may reset it afterwards."
+            )
         if (epoch >= self.joint_epoch or is_ft) and self._slmadv is not None:
             use_ind = np.random.rand() < 0.5
             rt = texts if use_ind else ref_texts

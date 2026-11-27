@@ -48,9 +48,15 @@ def train(
             )
 
         import lightning as L
+        from everyvoice.base_cli.checkpoint_io import atomic_checkpoint_io
+        from everyvoice.base_cli.slurm import (
+            resolve_resume_ckpt,
+            save_requeue_ckpt_to_last,
+        )
         from everyvoice.utils import update_config_from_cli_args
         from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
         from lightning.pytorch.loggers import TensorBoardLogger
+        from lightning.pytorch.plugins.io import TorchCheckpointIO
         from lightning.pytorch.strategies import DDPStrategy
 
         from ..ev_config import StyleTTS2Config
@@ -83,6 +89,28 @@ def train(
     )
 
     log_dir = config["log_dir"]
+    ckpt_dir = os.path.join(log_dir, "checkpoints")
+    # Stage 1 and stage 2 share the same checkpoints dir; name the "last"
+    # checkpoint per-mode so stage 2 doesn't replace stage 1's checkpoint.
+    mode_ckpt_names = {
+        Mode.first: "stage-1-last",
+        Mode.second: "stage-2-last",
+        Mode.finetune: "finetune-last",
+    }
+    resume_ckpt = resolve_resume_ckpt(
+        kwargs.get("auto_resume", False),
+        os.path.join(ckpt_dir, mode_ckpt_names[mode] + ModelCheckpoint.FILE_EXTENSION),
+        tr.finetune_checkpoint,
+    )
+    if (
+        resume_ckpt is None
+        and tr.finetune_checkpoint
+        and not os.path.exists(tr.finetune_checkpoint)
+    ):
+        sys.exit(
+            f"ERROR: finetune_checkpoint '{tr.finetune_checkpoint}' does not exist."
+        )
+
     os.makedirs(log_dir, exist_ok=True)
     shutil.copy(str(config_file), os.path.join(log_dir, config_file.name))
 
@@ -101,8 +129,9 @@ def train(
         sub_dir=mode_sub_dirs[mode],
     )
 
-    ckpt_dir = os.path.join(log_dir, "checkpoints")
-    ckpt_filename = f"epoch_{mode.value}_" + "{epoch:05d}"
+    # Include the step so a mid-epoch save (every_n_train_steps) never
+    # overwrites the checkpoint saved at the end of the previous epoch.
+    ckpt_filename = f"epoch_{mode.value}_" + "{epoch:05d}-{step}"
     # Always keep the last checkpoint regardless of performance.
     last_ckpt_callback = ModelCheckpoint(
         dirpath=ckpt_dir,
@@ -111,16 +140,9 @@ def train(
         save_last=True,
         every_n_train_steps=tr.ckpt_steps,
         every_n_epochs=tr.ckpt_epochs,
-        enable_version_counter=True,
+        enable_version_counter=False,
         save_on_train_epoch_end=True,
     )
-    # Stage 1 and stage 2 share the same checkpoints dir; name the "last"
-    # checkpoint per-mode so stage 2 doesn't replace stage 1's checkpoint.
-    mode_ckpt_names = {
-        Mode.first: "stage-1-last",
-        Mode.second: "stage-2-last",
-        Mode.finetune: "finetune-last",
-    }
     last_ckpt_callback.CHECKPOINT_NAME_LAST = mode_ckpt_names[mode]
     # Keep only the top-k checkpoints ranked by val/mel (lower is better).
     monitored_ckpt_callback = ModelCheckpoint(
@@ -162,15 +184,17 @@ def train(
         callbacks=[monitored_ckpt_callback, last_ckpt_callback, lr_monitor],
         log_every_n_steps=config.get("log_interval", 10),
         enable_progress_bar=True,
+        plugins=[atomic_checkpoint_io(TorchCheckpointIO)],
     )
+    save_requeue_ckpt_to_last(trainer, last_ckpt_callback)
 
     datamodule = StyleTTS2DataModule(config, load_for_everyvoice=True)
     model = StyleTTS2(config, mode=mode.value)
 
-    resume_ckpt = (
-        str(tr.finetune_checkpoint)
-        if tr.finetune_checkpoint and os.path.exists(tr.finetune_checkpoint)
-        else None
-    )
+    # Continue this experiment from its own last checkpoint
+    if resume_ckpt is not None:
+        trainer.fit(model, datamodule=datamodule, ckpt_path=str(resume_ckpt))
+        return
 
-    trainer.fit(model, datamodule=datamodule, ckpt_path=resume_ckpt)
+    finetune_ckpt = str(tr.finetune_checkpoint) if tr.finetune_checkpoint else None
+    trainer.fit(model, datamodule=datamodule, ckpt_path=finetune_ckpt)
