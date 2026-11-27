@@ -2,8 +2,10 @@ import os
 from pathlib import Path
 from typing import Annotated, Any, Optional
 
+from everyvoice import logger
 from everyvoice.config.preprocessing_config import PreprocessingConfig
 from everyvoice.config.shared_types import (
+    FROM_CHECKPOINT_CONTEXT,
     BaseModelWithContact,
     BaseTrainingConfig,
     ConfigModel,
@@ -501,14 +503,34 @@ class StyleTTS2TrainingConfig(BaseTrainingConfig):
         description="Filename (relative to log_dir) where the stage 1 checkpoint is saved. "
         "The default matches the checkpoint '--mode first' training produces automatically.",
     )
-    second_stage_load_pretrained: bool = Field(
-        default=True,
-        description="If True, load the stage 1 checkpoint when starting stage 2 training.",
-    )
-    load_only_params: bool = Field(
-        default=False,
-        description="If True, load only model parameters from a checkpoint (skip optimizer state and epoch number).",
-    )
+
+    # TODO: remove in the release after finetune_mode was added
+    @model_validator(mode="before")
+    @classmethod
+    def drop_deprecated_load_options(cls, data: Any, info: ValidationInfo) -> Any:
+        """Accept and ignore the deprecated second_stage_load_pretrained and
+        load_only_params: finetune_mode sets how finetune_checkpoint is loaded."""
+        if not isinstance(data, dict):
+            return data
+        deprecated = [
+            key
+            for key in ("second_stage_load_pretrained", "load_only_params")
+            if key in data
+        ]
+        if not deprecated:
+            return data
+        data = {k: v for k, v in data.items() if k not in deprecated}
+        if not (info.context and info.context.get(FROM_CHECKPOINT_CONTEXT)):
+            logger.warning(
+                f"training.{' and training.'.join(deprecated)} "
+                f"{'are' if len(deprecated) > 1 else 'is'} deprecated and ignored: "
+                "remove them from your config. training.finetune_mode sets how "
+                "training.finetune_checkpoint is loaded: 'weights-only' (the default) "
+                "loads only its weights, and 'full-state' also continues its "
+                "optimizer, learning rate schedule and epoch."
+            )
+        return data
+
     root_path: PossiblyRelativePath = Field(
         default=".",
         validate_default=True,

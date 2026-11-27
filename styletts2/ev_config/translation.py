@@ -59,8 +59,6 @@ def to_native_config(config: StyleTTS2Config) -> dict:
         "pretrained_model": (
             str(tr.finetune_checkpoint) if tr.finetune_checkpoint else ""
         ),
-        "second_stage_load_pretrained": tr.second_stage_load_pretrained,
-        "load_only_params": tr.load_only_params,
         # --- pretrained backbone sources ---
         "pretrained_f0": pre.f0.model_dump(mode="json"),
         "pretrained_asr": pre.asr.model_dump(mode="json"),

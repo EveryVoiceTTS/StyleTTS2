@@ -50,6 +50,7 @@ def train(
         import lightning as L
         from everyvoice.base_cli.checkpoint_io import atomic_checkpoint_io
         from everyvoice.base_cli.slurm import (
+            check_training_left,
             resolve_resume_ckpt,
             save_requeue_ckpt_to_last,
         )
@@ -188,13 +189,30 @@ def train(
     )
     save_requeue_ckpt_to_last(trainer, last_ckpt_callback)
 
-    datamodule = StyleTTS2DataModule(config, load_for_everyvoice=True)
-    model = StyleTTS2(config, mode=mode.value)
-
-    # Continue this experiment from its own last checkpoint
-    if resume_ckpt is not None:
-        trainer.fit(model, datamodule=datamodule, ckpt_path=str(resume_ckpt))
-        return
-
     finetune_ckpt = str(tr.finetune_checkpoint) if tr.finetune_checkpoint else None
-    trainer.fit(model, datamodule=datamodule, ckpt_path=finetune_ckpt)
+    if resume_ckpt is not None:
+        # Continue this experiment from its own last checkpoint
+        full_state_ckpt: str | None = str(resume_ckpt)
+    elif finetune_ckpt is not None and tr.finetune_mode == "full-state":
+        # Start a new experiment continuing another run's full training state
+        full_state_ckpt = finetune_ckpt
+        ckpt = torch.load(
+            finetune_ckpt, map_location="cpu", weights_only=True, mmap=True
+        )
+        max_epochs_setting = (
+            "training.epochs_1st"
+            if mode == Mode.first
+            else "training.epochs_2nd" if mode == Mode.second else "training.max_epochs"
+        )
+        check_training_left(ckpt, finetune_ckpt, None, max_epochs, max_epochs_setting)
+        del ckpt
+    else:
+        # From scratch, or weights only from finetune_checkpoint (loaded in
+        # StyleTTS2.setup())
+        full_state_ckpt = None
+
+    datamodule = StyleTTS2DataModule(config, load_for_everyvoice=True)
+    model = StyleTTS2(
+        config, mode=mode.value, restore_full_state=full_state_ckpt is not None
+    )
+    trainer.fit(model, datamodule=datamodule, ckpt_path=full_state_ckpt)
